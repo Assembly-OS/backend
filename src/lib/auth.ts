@@ -35,6 +35,22 @@ export function hashPassword(password: string): string {
   return `scrypt$${salt.toString("hex")}$${hash.toString("hex")}`;
 }
 
+/**
+ * Whether the session cookie may carry the `Secure` flag on this request.
+ *
+ * It must follow the protocol the browser actually used, not NODE_ENV: a
+ * production build served over plain http — which is exactly how the platform
+ * runs on localhost — would otherwise hand out a cookie that Safari refuses to
+ * store, and the user would be bounced back to the login screen with correct
+ * credentials. Behind the cloudflared tunnel the request arrives as https via
+ * `x-forwarded-proto`, so the flag is set where it genuinely protects.
+ */
+export function isSecureRequest(request: Request): boolean {
+  const forwarded = request.headers.get("x-forwarded-proto");
+  if (forwarded) return forwarded.split(",")[0].trim() === "https";
+  return new URL(request.url).protocol === "https:";
+}
+
 export function verifyPassword(password: string, stored: string): boolean {
   const [scheme, saltHex, hashHex] = stored.split("$");
   if (scheme !== "scrypt" || !saltHex || !hashHex) return false;

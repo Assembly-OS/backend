@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { get } from "@/lib/db";
 import {
   createToken,
+  isSecureRequest,
   SESSION_COOKIE,
   SESSION_MAX_AGE,
   verifyPassword,
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest(request),
     path: "/",
     maxAge: SESSION_MAX_AGE,
   });

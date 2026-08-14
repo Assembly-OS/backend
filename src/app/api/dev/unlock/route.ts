@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isSecureRequest } from "@/lib/auth";
 import { DEV_COOKIE, keyMatches } from "@/lib/dev-auth";
 
 /**
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
   res.cookies.set(DEV_COOKIE, key!, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest(request),
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });

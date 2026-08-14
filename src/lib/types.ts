@@ -118,11 +118,23 @@ export interface TaskRow extends Task {
   return_comment: string | null;
 }
 
+/** What a chat row carries: plain text, or one attached blob plus a caption. */
+export type MessageKind = "text" | "photo" | "voice" | "file";
+
 export interface Message {
   id: number;
   from_user_id: number;
   to_user_id: number;
+  /** The text, or the attachment's caption — empty string when there is none. */
   body: string;
+  kind: MessageKind;
+  file_name: string | null;
+  file_size: number | null;
+  file_mime: string | null;
+  /** Storage key, server-side only — never serialised to the client. */
+  file_key: string | null;
+  /** Voice length in seconds. */
+  duration: number | null;
   created_at: string;
   read_at: string | null;
 }
@@ -148,34 +160,52 @@ export function receivesTasks(role: Role): boolean {
   return role !== "RAIS";
 }
 
+/**
+ * Badge tone: a neutral chip, hue carried by the text alone.
+ *
+ * The earlier scheme filled each chip with its own pastel — seven for status,
+ * four for priority — so a single task row could show four saturated
+ * rectangles and none of them meant anything more than the others. Colour is a
+ * signal; spending it on every chip spends it on nothing. Here the chip is
+ * always the page's own surface, and only the word is coloured, which leaves
+ * the rose of an overdue critical task as the one thing on the row that shouts.
+ */
+const CHIP = "bg-[var(--surface)] ring-[var(--line)]";
+
 export function statusTone(status: TaskStatus): string {
   switch (status) {
+    // Waiting on someone: no hue, it is the resting state.
     case "YANGI":
-      return "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/30";
+      return `${CHIP} muted`;
     case "QABUL_QILINDI":
-      return "bg-indigo-50 text-indigo-700 ring-indigo-600/20 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-400/30";
+      return `${CHIP} text-sky-700 dark:text-sky-300`;
+    // Work is happening.
     case "BAJARILMOQDA":
-      return "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/30";
+      return `${CHIP} text-amber-700 dark:text-amber-300`;
+    // Waiting on the manager — the same "needs attention" family.
     case "TEKSHIRUVDA":
-      return "bg-violet-50 text-violet-700 ring-violet-600/20 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-400/30";
+      return `${CHIP} text-amber-800 dark:text-amber-200`;
     case "BAJARILDI":
-      return "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/30";
+      return `${CHIP} text-emerald-700 dark:text-emerald-300`;
+    // Something went wrong and someone has to act.
     case "QAYTARILDI":
-      return "bg-orange-50 text-orange-700 ring-orange-600/20 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-400/30";
     case "RAD_ETILDI":
-      return "bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30";
+      return `${CHIP} text-rose-700 dark:text-rose-300`;
   }
 }
 
+/**
+ * Priority is a modifier, not a state — it stays quiet until it is worth
+ * hearing. Normal and low are plain text; only high and critical take colour.
+ */
 export function priorityTone(priority: Priority): string {
   switch (priority) {
     case "PAST":
-      return "bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-500/10 dark:text-slate-300 dark:ring-slate-400/30";
     case "ORTA":
-      return "bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/30";
+      return `${CHIP} muted`;
     case "YUQORI":
-      return "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/30";
+      return `${CHIP} text-amber-700 dark:text-amber-300`;
     case "KRITIK":
-      return "bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30";
+      return "bg-rose-50 text-rose-700 ring-rose-600/25 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30";
   }
 }

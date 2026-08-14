@@ -1,7 +1,11 @@
 const uz = {
-  "app.name": "ASSAMBLEYA OS",
+  "app.name": "ASSEMBLY OS",
   "app.short": "OS",
   "app.org": "O'zbekiston Iqtisodiyot Assambleyasi",
+  "a11y.skipToContent": "Asosiy qismga o'tish",
+  "notify.title": "Bildirishnomalar",
+  "notify.empty": "Yangi bildirishnoma yo'q",
+  "notify.readAll": "Hammasini o'qilgan deb belgilash",
   "app.tagline": "Bir maqsad. Bir tizim. Bir natija.",
   "app.subtitle": "Integratsiyalashgan raqamli boshqaruv tizimi",
 
@@ -15,12 +19,13 @@ const uz = {
   "login.rateLimit": "Juda ko'p urinish. Birozdan so'ng qayta urinib ko'ring.",
   "login.empty": "Login va parolni kiriting",
   "login.secure": "Ulanish himoyalangan • 2FA tayyor",
-  "login.demo": "Demo hisoblar",
-  "login.demoHint": "Parol barcha demo hisoblar uchun:",
-  "login.copy": "Nusxalash",
 
   "nav.dashboard": "Shaxsiy kabinet",
   "nav.tasks": "Topshiriqlar",
+  "nav.group.work": "Ish",
+  "nav.group.partners": "Hamkorlar",
+  "nav.group.ai": "AI",
+  "nav.group.manage": "Boshqaruv",
   "nav.inbox": "Topshiriq qabul qilish",
   "nav.execute": "Topshiriqni bajarish",
   "nav.assign": "Topshiriq berish",
@@ -67,6 +72,7 @@ const uz = {
   "dashboard.overdue": "Muddati o'tgan",
   "dashboard.sent": "Yuborilgan",
   "dashboard.recent": "So'nggi topshiriqlar",
+  "dashboard.noRecent": "Hozircha topshiriqlar yo'q",
   "dashboard.unread": "O'qilmagan xabarlar",
   "dashboard.quickActions": "Tezkor amallar",
   "dashboard.discipline": "Ijro intizomi",
@@ -113,6 +119,10 @@ const uz = {
   "tasks.returnReason": "Qayta ishlash uchun izoh",
   "tasks.filter.all": "Hammasi",
   "tasks.filter.empty": "Ushbu filtr bo'yicha topshiriq yo'q",
+  "tasks.showMore": "Yana ko'rsatish",
+  "tasks.delete": "Qaytarib olish",
+  "tasks.deleteConfirm": "Ha, o'chirilsin",
+  "tasks.deleteTooLate": "Xodim topshiriqni qabul qilib bo'lgan — endi izoh bilan yopish kerak",
 
   "action.accept": "Qabul qilish",
   "action.reject": "Rad etish",
@@ -149,6 +159,17 @@ const uz = {
   "chat.rais": "Rais bilan bevosita aloqa",
   "chat.tabChats": "Suhbatlar",
   "chat.tabPeople": "Xodimlar",
+  "chat.tabGroups": "Guruhlar",
+  "chat.newGroup": "Yangi guruh",
+  "chat.groupName": "Guruh nomi",
+  "chat.groupMembers": "A'zolar",
+  "chat.groupCreate": "Yaratish",
+  "chat.groupCreating": "Yaratilmoqda...",
+  "chat.noGroups": "Guruhlar yo'q",
+  "chat.pickMembers": "Kamida bitta xodimni tanlang",
+  "chat.membersCount": "a'zo",
+  "chat.groupEmpty": "Guruh yaratildi — birinchi xabarni yozing",
+  "chat.groupCreateError": "Guruh yaratilmadi",
   "chat.filter": "Login, ism yoki bo'lim",
   "chat.searchHint": "Xodimni ro'yxatdan tanlang va yozing",
   "chat.start": "Yozish",
@@ -170,6 +191,21 @@ const uz = {
   "chat.selectChat": "Suhbatni tanlang yoki xodimlar ro'yxatidan yozing",
   "chat.newMessages": "yangi",
   "chat.you": "Siz",
+  "chat.attach": "Biriktirish",
+  "chat.photo": "Rasm",
+  "chat.file": "Fayl",
+  "chat.voice": "Ovozli xabar",
+  "chat.record": "Ovozli xabar yozish",
+  "chat.recordCancel": "Bekor qilish",
+  "chat.recordSend": "Yuborish",
+  "chat.micDenied": "Mikrofonga ruxsat berilmadi",
+  "chat.micUnsupported": "Brauzer ovoz yozishni qo'llab-quvvatlamaydi",
+  "chat.tooLarge": "Fayl juda katta (maksimum {n})",
+  "chat.uploadFailed": "Faylni yuborib bo'lmadi",
+  "chat.download": "Yuklab olish",
+  "chat.caption": "Izoh qo'shish...",
+  "chat.attachRemove": "Olib tashlash",
+  "chat.uploading": "yuborilmoqda…",
 
   "stats.title": "Uyushmalar statistikasi",
   "stats.desc": "50+ soha uyushmalari kesimida faollik va ijro ko'rsatkichlari",
@@ -221,6 +257,12 @@ const uz = {
   "profile.passwordChanged": "Parol yangilandi",
   "profile.passwordError": "Joriy parol noto'g'ri",
   "profile.passwordShort": "Parol kamida 6 belgidan iborat bo'lsin",
+  "profile.confirmPassword": "Yangi parolni takrorlang",
+  "profile.passwordMismatch": "Parollar mos kelmadi",
+  "profile.passwordSame": "Yangi parol eskisidan farq qilishi kerak",
+  "profile.passwordRule": "Kamida 6 belgi. Ismingiz va yilni emas, o'zingiz o'ylagan parolni kiriting.",
+  "profile.showPassword": "Parolni ko'rsatish",
+  "profile.hidePassword": "Parolni yashirish",
   "profile.myLogin": "Sizning loginingiz",
   "profile.loginHint": "Hamkasblar sizga shu login orqali yozishlari mumkin",
 
@@ -235,10 +277,383 @@ const uz = {
   "live.newTaskHint": "Rahbaringiz sizga topshiriq yubordi",
   "live.open": "Ko'rish",
 
+  "admin.signIn": "Boshqaruv paneliga kirish",
+  "admin.signInHint": "Panel alohida hisob bilan himoyalangan",
+  "admin.notConfigured": "Administrator paroli sozlanmagan. Serverda ADMIN_PASSWORD_HASH ni belgilang.",
+  "admin.separateNote": "Bu hisob platformaga kirmaydi, xodim hisobi esa bu panelni ochmaydi",
+  "admin.title": "Boshqaruv paneli",
+  "admin.subtitle": "Xodimlar va tizim holati",
+  "admin.tabStaff": "Xodimlar",
+  "admin.tabPanel": "Tizim paneli",
+  "admin.tabChats": "Yozishmalar",
+  "admin.conversations": "Suhbatlar",
+  "admin.messages": "Xabarlar",
+  "admin.attachments": "Biriktirmalar",
+  "admin.openThread": "Ochish",
+  "admin.selectThread": "Ko'rish uchun suhbatni tanlang",
+  "admin.noChats": "Yozishmalar yo'q",
+  "admin.deleteMessage": "Xabarni o'chirish",
+  "admin.confirmDeleteMessage": "Xabar butunlay o'chiriladi. Davom etasizmi?",
+  "admin.messageDeleted": "Xabar o'chirildi",
+  "admin.loadingThread": "Yuklanmoqda...",
+  "admin.readAt": "O'qilgan",
+  "admin.unread": "O'qilmagan",
+  "admin.newStaff": "Yangi xodim",
+  "admin.fullName": "F.I.Sh.",
+  "admin.login": "Login",
+  "admin.password": "Parol",
+  "admin.generate": "Yaratish",
+  "admin.role": "Lavozim darajasi",
+  "admin.department": "Bo'lim",
+  "admin.position": "Lavozimi",
+  "admin.manager": "Rahbari",
+  "admin.phone": "Telefon",
+  "admin.email": "Email",
+  "admin.language": "Til",
+  "admin.noDepartment": "Bo'limsiz",
+  "admin.noManager": "Rahbarsiz",
+  "admin.create": "Qo'shish",
+  "admin.creating": "Qo'shilmoqda...",
+  "admin.created": "Xodim qo'shildi",
+  "admin.cancel": "Bekor qilish",
+  "admin.save": "Saqlash",
+  "admin.saved": "Saqlandi",
+  "admin.edit": "Tahrirlash",
+  "admin.staffCount": "Jami xodimlar",
+  "admin.active": "Faol",
+  "admin.inactive": "Faol emas",
+  "admin.deactivate": "Faolsizlantirish",
+  "admin.activate": "Faollashtirish",
+  "admin.resetPassword": "Parolni almashtirish",
+  "admin.newPassword": "Yangi parol",
+  "admin.passwordSet": "Parol o'rnatildi",
+  "admin.copyNow": "Hozir nusxa oling — parol boshqa ko'rsatilmaydi",
+  "admin.confirmDeactivate": "Ushbu xodim tizimga kira olmaydi. Davom etasizmi?",
+  "admin.never": "hech qachon",
+  "admin.lastSeen": "Oxirgi tashrif",
+  "admin.tasksCount": "Topshiriqlar",
+  "admin.errRequired": "Barcha majburiy maydonlarni to'ldiring",
+  "admin.errLogin": "Login faqat lotin harflari, raqamlar, nuqta va chiziqchadan iborat bo'lsin (3-32 belgi)",
+  "admin.errWeak": "Parol kamida 8 belgidan iborat bo'lsin",
+  "admin.errTaken": "Bunday login allaqachon mavjud",
+  "admin.errLastRais": "Yagona Raisni o'chirib bo'lmaydi",
+  "admin.errSelf": "O'z hisobingizni faolsizlantira olmaysiz",
+  "admin.errFailed": "Xatolik yuz berdi",
+  "admin.system": "Tizim",
+  "admin.database": "Ma'lumotlar bazasi",
+  "admin.onlineNow": "Hozir tarmoqda",
+  "admin.nobodyOnline": "Hech kim tarmoqda emas",
+  "admin.recentEvents": "So'nggi hodisalar",
+  "admin.noEvents": "Hodisalar yo'q",
+  "admin.uptime": "Ishlash vaqti",
+  "admin.env": "Muhit",
+  "admin.nodeVersion": "Node versiyasi",
+  "admin.dbSize": "Baza hajmi",
+  "admin.tasksByStatus": "Holat bo'yicha topshiriqlar",
+  "admin.totalUsers": "Jami foydalanuvchilar",
+  "admin.records": "Yozuvlar",
+
+  "nav.reports": "Haftalik hisobot",
+
+  "nav.meetings": "Uchrashuv xulosalari",
+
+  "nav.partners": "AI takliflari",
+
+  "nav.companies": "Kompaniyalar",
+
+  "nav.agreements": "Kelishuvlar",
+
+  "nav.assistant": "AI suhbat",
+
+  "assistant.title": "AI suhbat",
+
+  "assistant.desc": "Tizimdagi ma'lumotlar bo'yicha savol bering",
+
+  "assistant.empty": "Savolingizni yozing",
+
+  "assistant.emptyHint": "Javob faqat tizimdagi yozuvlarga asoslanadi va manbalarga havola bilan keladi",
+
+  "assistant.placeholder": "Masalan: oxirgi marta qaysi kompaniya bilan uchrashdik?",
+
+  "assistant.send": "Yuborish",
+
+  "assistant.thinking": "Ma'lumotlar qidirilmoqda...",
+
+  "assistant.examples": "Savol namunalari",
+
+  "assistant.scope": "Javoblar faqat siz ko'ra oladigan yozuvlar asosida",
+
+  "assistant.tooFast": "Juda tez — bir daqiqadan so'ng urinib ko'ring",
+
+  "assistant.tooComplex": "Savol juda murakkab. Uni ikkiga bo'ling.",
+
+  "assistant.failed": "Javob kelmadi — model bilan aloqa uzildi. Qayta urinib ko'ring.",
+  "assistant.refused": "Model bu savolga javob berishdan bosh tortdi.",
+  "assistant.clear": "Chatni tozalash",
+  "assistant.clearConfirm": "Ha, tozalansin",
+  "crm.deleteCompany": "Kompaniyani o'chirish",
+  "crm.deleteCompanyConfirm": "Ha, o'chirilsin",
+  "crm.deleteCompanyWarn": "Kompaniya bilan birga uning kontaktlari va kelishuvlari o'chadi. Uchrashuvlar saqlanadi, lekin bog'lanishi yo'qoladi.",
+
+  "assistant.q1": "Qaysi kelishuvlar muddati o'tgan?",
+
+  "assistant.q2": "Bu oy qaysi kompaniyalar bilan uchrashdik?",
+
+  "assistant.q3": "Qaysi kompaniyalar IT xizmatlarini ko'rsatadi?",
+
+  "assistant.q4": "Shu hafta nima qilishim kerak?",
+
+  "crm.companies": "Kompaniyalar",
+
+  "crm.companiesDesc": "Assambleya hamkorlari va ular bilan munosabatlar tarixi",
+
+  "crm.newCompany": "Kompaniya qo'shish",
+
+  "crm.newMeeting": "Uchrashuv qo'shish",
+
+  "crm.newContact": "Kontakt qo'shish",
+
+  "crm.selectCompany": "Kompaniyani tanlang",
+  "crm.noCompanyYet": "Avval kompaniya qo'shing — kelishuv kimdir bilan tuziladi",
+  "crm.reminderNote": "Mas'ul va muddat ko'rsatilsa, eslatma o'zi keladi — bir kun oldin va muddat kuni",
+  "crm.newAgreement": "Kelishuv qo'shish",
+
+  "crm.noCompanies": "Hali kompaniya kiritilmagan",
+
+  "crm.status.POTENTIAL": "Potensial",
+
+  "crm.status.ACTIVE": "Faol",
+
+  "crm.status.PAUSED": "To'xtatilgan",
+
+  "crm.status.ARCHIVED": "Arxiv",
+
+  "crm.agr.NEW": "Yangi",
+
+  "crm.agr.IN_PROGRESS": "Jarayonda",
+
+  "crm.agr.DONE": "Bajarilgan",
+
+  "crm.agr.CANCELLED": "Bekor qilingan",
+
+  "crm.agr.OVERDUE": "Muddati o'tgan",
+
+  "crm.field.industry": "Soha",
+
+  "crm.field.services": "Xizmatlar",
+
+  "crm.field.country": "Davlat",
+
+  "crm.field.city": "Shahar",
+
+  "crm.field.address": "Manzil",
+
+  "crm.field.website": "Veb-sayt",
+
+  "crm.field.email": "Email",
+
+  "crm.field.phone": "Telefon",
+
+  "crm.field.head": "Rahbar",
+
+  "crm.field.headPosition": "Rahbar lavozimi",
+
+  "crm.field.status": "Hamkorlik holati",
+
+  "crm.field.started": "Hamkorlik boshlangan",
+
+  "crm.field.nextContact": "Keyingi aloqa",
+
+  "crm.field.lastContact": "So'nggi aloqa",
+
+  "crm.field.owner": "Mas'ul xodim",
+
+  "crm.field.notes": "Izohlar",
+
+  "crm.field.description": "Qisqacha",
+
+  "crm.field.direction": "Yo'nalish",
+
+  "crm.tab.meetings": "Uchrashuvlar",
+
+  "crm.tab.agreements": "Kelishuvlar",
+
+  "crm.tab.contacts": "Kontaktlar",
+
+  "crm.agreements": "Kelishuvlar",
+
+  "crm.agreementsDesc": "Muddatlar va mas'ullar bo'yicha nazorat",
+
+  "crm.today": "Bugun",
+
+  "reports.thisMonth": "Shu oy",
+
+  "crm.soon": "Yaqin kunlarda",
+
+  "crm.overdue": "Muddati o'tgan",
+
+  "crm.later": "Keyinroq",
+
+  "crm.noDeadline": "Muddatsiz",
+
+  "crm.noAgreements": "Ochiq kelishuvlar yo'q",
+
+  "crm.needsAttention": "E'tibor talab qiladi",
+
+  "crm.participants": "Ishtirokchilar",
+
+  "crm.place": "Joy / format",
+
+  "crm.transcript": "Uchrashuv matni",
+
+  "crm.analyze": "AI bilan tahlil qilish",
+
+  "crm.analyzing": "Tahlil qilinmoqda...",
+
+  "crm.search": "Qidirish",
+
+  "crm.searchHint": "Kompaniya, odam, uchrashuv, kelishuv",
+
+  "crm.nothingFound": "Hech narsa topilmadi",
+
+  "crm.markDone": "Bajarildi",
+
+  "crm.markProgress": "Jarayonga olish",
+
+  "crm.saved": "Saqlandi",
+
+  "crm.isHead": "Rahbar",
+  "report.title": "Haftalik hisobot",
+  "report.subtitle": "Kim qanday ishladi",
+  "report.prevWeek": "Oldingi hafta",
+  "report.nextWeek": "Keyingi hafta",
+  "report.created": "Yangi topshiriqlar",
+  "report.done": "Bajarildi",
+  "report.returned": "Qaytarildi",
+  "report.overdue": "Muddati o'tgan",
+  "report.byPerson": "Xodimlar bo'yicha",
+  "report.person": "Xodim",
+  "report.colGiven": "Berdi",
+  "report.colReceived": "Oldi",
+  "report.colSubmitted": "Topshirdi",
+  "report.colDone": "Bajardi",
+  "report.colReturned": "Qaytarilgan",
+  "report.colOverdue": "Muddati o'tgan",
+  "report.colMessages": "Xabarlar",
+  "report.completion": "Bajarilish darajasi",
+  "report.activeStaff": "Faol xodimlar",
+  "report.messages": "Xabarlar",
+  "report.idle": "Harakatsiz",
+  "report.everyoneWorked": "Hamma ishladi",
+  "report.nobody": "Bu haftada harakat bo'lmadi",
+
+  "admin.tabAgents": "Agentlar",
+  "agent.title": "AI agentlar",
+  "agent.subtitle": "Orkestrator: doira, tasdiq va audit",
+  "agent.run": "Ishga tushirish",
+  "agent.running": "Bajarilmoqda...",
+  "agent.active": "Faol",
+  "agent.planned": "Rejada",
+  "agent.dataScope": "Ma'lumot doirasi",
+  "agent.actionScope": "Harakat doirasi",
+  "agent.approval": "Tasdiq",
+  "agent.budget": "Token limiti",
+  "agent.approvalAlways": "Har doim",
+  "agent.approvalSide": "Faqat tashqi ta'sirda",
+  "agent.proposals": "Takliflar",
+  "agent.pendingOnly": "Faqat kutilayotgan",
+  "agent.approve": "Tasdiqlash",
+  "agent.reject": "Rad etish",
+  "agent.noProposals": "Takliflar yo'q",
+  "agent.runs": "Ishga tushirishlar",
+  "agent.noRuns": "Yozuvlar yo'q",
+  "agent.contextRows": "Qatorlar",
+  "agent.duration": "Davomiylik",
+  "agent.tokens": "Tokenlar",
+  "agent.llmOff": "AI kaliti sozlanmagan — agentlar kalitsiz ham ishlaydi",
+  "agent.blocked": "To'xtatildi",
+  "agent.decidedBy": "Kim qaror qildi",
+
+  "nav.ai": "AI yordamchi",
+  "ai.title": "AI yordamchi",
+  "ai.subtitle": "Hujjat va uchrashuvdan topshiriq ajratish",
+  "ai.tabDocument": "Hujjat (PDF)",
+  "ai.tabMeeting": "Uchrashuv",
+  "ai.documentHint": "Hujjat yuboring — AI topshiriqlarni ajratib, bo'lim rahbarlariga tekshirish uchun yuboradi.",
+  "ai.pickPdf": "PDF tanlash",
+  "ai.pickFile": "Fayl tanlash",
+  "ai.badFormat": "Bu format qo'llab-quvvatlanmaydi",
+  "ai.noText": "Faylda matn topilmadi",
+  "ai.unreadable": "Faylni o'qib bo'lmadi",
+  "ai.formats": "PDF, Word, Excel, PowerPoint, rasm/skan, matn",
+  "ai.analyzing": "Tahlil qilinmoqda...",
+  "ai.analyze": "Tahlil qilish",
+  "ai.onlyPdf": "Faqat PDF qabul qilinadi",
+  "ai.tooLarge": "Fayl juda katta (maks. 20 MB)",
+  "ai.meetingTitle": "Uchrashuv nomi",
+  "ai.startRecording": "Yozishni boshlash",
+  "ai.stopRecording": "To'xtatish",
+  "ai.speechLang": "Nutq tili",
+  "ai.sttOn": "Nutq matnga o'giriladi",
+  "ai.sttOff": "Brauzer nutqni tanimaydi — matnni qo'lda kiriting",
+  "ai.created": "Yaratildi",
+  "ai.autoNote": "Topshiriqlar bo'lim rahbari tasdiqlagach yaratiladi",
+  "ai.sttDenied": "Nutqni tanishga ruxsat berilmadi. macOS: Tizim sozlamalari → Klaviatura → Diktovka yoqilsin, Safari uchun mikrofon ruxsati berilsin.",
+  "ai.sttNoMic": "Mikrofon band — uni boshqa dastur yoki ochiq varaq ishlatmoqda",
+  "ai.sttServer": "Ovoz yozib olinadi va serverda matnga o'giriladi",
+  "ai.sttFallback": "Brauzer nutqni tanimadi — ovoz yozilmoqda, matnga server o'giradi",
+  "ai.transcribing": "Ovoz matnga o'girilmoqda...",
+  "ai.sttOffline": "Serverda nutqni tanish moduli o'rnatilmagan",
+  "ai.sttTooLong": "Yozuv juda uzun (maks. 2 soat)",
+  "ai.sttEmpty": "Yozuvda nutq topilmadi",
+  "ai.sttFailed": "Ovozni matnga o'girib bo'lmadi",
+  "ai.readyToSend": "Yozuv tayyor — «Tahlil qilish» tugmasini bosing, matn serverda tayyorlanadi",
+  "ai.recordings": "Uchrashuv yozuvlari",
+  "ai.noRecordings": "Hali yozuv yo'q",
+  "ai.noAudioKept": "Ovoz saqlanmagan — faqat matn",
+  "meetings.title": "Uchrashuv xulosalari",
+  "meetings.subtitle": "Har bir uchrashuv nima bilan yakunlangani — siz o'qiyotgan tilda",
+  "meetings.empty": "Hali birorta uchrashuv tahlil qilinmagan",
+  "meetings.noConclusion": "Bu uchrashuv xulosasi saqlanmagan — faqat bayonnomasi bor",
+  "partners.title": "Kompaniyalar va muzokaralar tarixi",
+  "partners.subtitle": "Kim bilan nima muhokama qilingan va keyingi safar nima taklif qilish mumkin",
+  "partners.empty": "Hali birorta kompaniya haqida yozuv yo'q",
+  "partners.propose": "Taklif qilish mumkin",
+  "partners.history": "Muzokaralar tarixi",
+  "partners.lastTalk": "So'nggi muloqot",
+  "partners.kind.muhokama": "muhokama",
+  "partners.kind.taklif": "taklif qildik",
+  "partners.kind.ehtiyoj": "ularga kerak",
+  "partners.kind.kelishuv": "kelishildi",
+  "partners.kind.xavf": "xavf",
+  "ai.livePicture": "Uchrashuv jonli tahlili",
+  "ai.liveDecisions": "Qarorlar",
+  "ai.livePlan": "Reja",
+  "ai.liveQuestions": "Ochiq savollar",
+  "ai.status.taklif": "taklif",
+  "ai.status.kelishildi": "kelishildi",
+  "ai.status.bajarilmoqda": "bajarilmoqda",
+  "ai.remembered": "Esda saqlandi",
+  "ai.transcriptPlaceholder": "Bayonnoma shu yerda paydo bo'ladi. Tahrirlash mumkin.",
+  "ai.transcriptShort": "Matn juda qisqa (kamida 40 belgi)",
+  "ai.keyPoints": "Asosiy nuqtalar",
+  "ai.drafts": "Takliflar",
+  "ai.dropped": "Rad etildi",
+  "ai.pending": "Tasdiq kutilmoqda",
+  "ai.createTask": "Topshiriq yaratish",
+  "ai.edit": "Tahrirlash",
+  "ai.saveAndCreate": "Saqlash va yaratish",
+  "ai.cancelEdit": "Bekor qilish",
+  "ai.notAssignable": "Bu xodimga topshiriq berish huquqingiz yo'q",
+  "ai.reviewNote": "Topshiriqlar avval bo'lim rahbariga boradi — u tekshiradi va xatolarni tuzatadi",
+  "ai.history": "Tarix",
+
   "common.other": "Boshqalar",
   "common.all": "Barchasi",
   "common.search": "Qidirish",
   "common.save": "Saqlash",
+  "common.add": "Qo'shish",
+  "common.delete": "O'chirish",
   "common.saved": "Saqlandi",
   "common.loading": "Yuklanmoqda...",
   "common.noData": "Ma'lumot yo'q",

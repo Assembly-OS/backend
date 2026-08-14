@@ -1,28 +1,111 @@
 import type { Translator } from "./i18n";
 
-/** SQLite stores `YYYY-MM-DD[ HH:MM:SS]`; these helpers stay locale-neutral. */
+/**
+ * SQLite stores `YYYY-MM-DD[ HH:MM:SS]`. A value with a time is an **instant**
+ * and is stored in UTC; a value without one is a **calendar date** the user
+ * typed (a deadline) and means that day wherever they are.
+ *
+ * The distinction is the whole of this file's subtlety. Instants must be
+ * shifted into the Assembly's own time before anyone reads them — printing the
+ * stored string put every timestamp five hours in the past. Calendar dates must
+ * not be shifted: a deadline of the 14th is the 14th, and running it through a
+ * timezone can only move it to the 13th.
+ */
+
+/**
+ * Where the Assembly works. Fixed rather than read from the viewer's browser:
+ * a task logged at 15:04 in Tashkent is 15:04 in the record, whoever opens it
+ * and wherever from — and, since the server renders these pages too, a fixed
+ * zone is also what keeps its output identical to the browser's.
+ */
+const TIME_ZONE = process.env.NEXT_PUBLIC_TIME_ZONE || "Asia/Tashkent";
+
+const LOCAL = new Intl.DateTimeFormat("en-GB", {
+  timeZone: TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+interface Local {
+  day: string;
+  month: string;
+  year: string;
+  hour: string;
+  minute: string;
+}
+
+/** Splits a stored UTC instant into its parts in Assembly time. */
+function localParts(value: string): Local | null {
+  const at = new Date(`${value.replace(" ", "T")}Z`);
+  if (Number.isNaN(at.getTime())) return null;
+  const parts: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  for (const part of LOCAL.formatToParts(at)) parts[part.type] = part.value;
+  if (!parts.year || !parts.day) return null;
+  return {
+    day: parts.day,
+    month: parts.month!,
+    year: parts.year,
+    hour: parts.hour!,
+    minute: parts.minute!,
+  };
+}
 
 export function formatDate(value: string | null): string {
   if (!value) return "—";
-  const [date] = value.split(" ");
-  const [y, m, d] = date.split("-");
-  if (!y || !m || !d) return value;
-  return `${d}.${m}.${y}`;
+  // No time part: a calendar date, printed as written.
+  if (!value.includes(" ")) {
+    const [y, m, d] = value.split("-");
+    return y && m && d ? `${d}.${m}.${y}` : value;
+  }
+  const local = localParts(value);
+  return local ? `${local.day}.${local.month}.${local.year}` : value;
 }
 
 export function formatDateTime(value: string | null): string {
   if (!value) return "—";
-  const [date, time = ""] = value.split(" ");
-  return `${formatDate(date)}${time ? ` ${time.slice(0, 5)}` : ""}`;
+  if (!value.includes(" ")) return formatDate(value);
+  const local = localParts(value);
+  return local
+    ? `${local.day}.${local.month}.${local.year} ${local.hour}:${local.minute}`
+    : value;
 }
 
 /** Chat bubbles: time for today, day+month otherwise. */
 export function formatChatTime(value: string): string {
-  const [date, time = "00:00:00"] = value.split(" ");
-  const today = new Date().toISOString().slice(0, 10);
-  if (date === today) return time.slice(0, 5);
-  const [, m, d] = date.split("-");
-  return `${d}.${m} ${time.slice(0, 5)}`;
+  const local = localParts(value);
+  if (!local) return value;
+  // "Today" is today in Tashkent, not today in UTC — otherwise messages sent
+  // after 05:00 local get stamped with a date for the first five hours.
+  const today = localParts(new Date().toISOString().slice(0, 19).replace("T", " "));
+  if (
+    today &&
+    today.year === local.year &&
+    today.month === local.month &&
+    today.day === local.day
+  ) {
+    return `${local.hour}:${local.minute}`;
+  }
+  return `${local.day}.${local.month} ${local.hour}:${local.minute}`;
+}
+
+/** `847 KB`, `2.4 MB` — locale-neutral, one decimal only where it informs. */
+export function formatBytes(bytes: number | null): string {
+  if (!bytes || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
+
+/** Voice-note length as `m:ss`. */
+export function formatDuration(seconds: number | null): string {
+  const total = Math.max(0, Math.round(seconds ?? 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
 export function daysUntil(deadline: string | null): number | null {

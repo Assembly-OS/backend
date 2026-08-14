@@ -1,9 +1,13 @@
 import type { Dictionary } from "./uz";
 
 const en: Dictionary = {
-  "app.name": "ASSAMBLEYA OS",
+  "app.name": "ASSEMBLY OS",
   "app.short": "OS",
   "app.org": "Economic Assembly of Uzbekistan",
+  "a11y.skipToContent": "Skip to content",
+  "notify.title": "Notifications",
+  "notify.empty": "No new notifications",
+  "notify.readAll": "Mark all as read",
   "app.tagline": "One goal. One system. One result.",
   "app.subtitle": "Integrated digital management system",
 
@@ -17,12 +21,13 @@ const en: Dictionary = {
   "login.rateLimit": "Too many attempts. Please try again later.",
   "login.empty": "Enter login and password",
   "login.secure": "Secure connection • 2FA ready",
-  "login.demo": "Demo accounts",
-  "login.demoHint": "Password for all demo accounts:",
-  "login.copy": "Copy",
 
   "nav.dashboard": "My workspace",
   "nav.tasks": "Assignments",
+  "nav.group.work": "Work",
+  "nav.group.partners": "Partners",
+  "nav.group.ai": "AI",
+  "nav.group.manage": "Management",
   "nav.inbox": "Incoming assignments",
   "nav.execute": "Execute assignments",
   "nav.assign": "Give assignments",
@@ -69,6 +74,7 @@ const en: Dictionary = {
   "dashboard.overdue": "Overdue",
   "dashboard.sent": "Sent",
   "dashboard.recent": "Recent assignments",
+  "dashboard.noRecent": "No assignments yet",
   "dashboard.unread": "Unread messages",
   "dashboard.quickActions": "Quick actions",
   "dashboard.discipline": "Execution discipline",
@@ -115,6 +121,10 @@ const en: Dictionary = {
   "tasks.returnReason": "Rework notes",
   "tasks.filter.all": "All",
   "tasks.filter.empty": "No tasks match this filter",
+  "tasks.showMore": "Show more",
+  "tasks.delete": "Withdraw",
+  "tasks.deleteConfirm": "Yes, delete",
+  "tasks.deleteTooLate": "The assignee has already accepted it — close it with a comment instead",
 
   "action.accept": "Accept",
   "action.reject": "Reject",
@@ -151,6 +161,17 @@ const en: Dictionary = {
   "chat.rais": "Direct line to the Rais",
   "chat.tabChats": "Chats",
   "chat.tabPeople": "People",
+  "chat.tabGroups": "Groups",
+  "chat.newGroup": "New group",
+  "chat.groupName": "Group name",
+  "chat.groupMembers": "Members",
+  "chat.groupCreate": "Create",
+  "chat.groupCreating": "Creating...",
+  "chat.noGroups": "No groups yet",
+  "chat.pickMembers": "Pick at least one colleague",
+  "chat.membersCount": "members",
+  "chat.groupEmpty": "Group created — write the first message",
+  "chat.groupCreateError": "Could not create the group",
   "chat.filter": "Login, name or department",
   "chat.searchHint": "Pick a colleague from the list and write to them",
   "chat.start": "Message",
@@ -172,6 +193,21 @@ const en: Dictionary = {
   "chat.selectChat": "Pick a conversation or message someone from the list",
   "chat.newMessages": "new",
   "chat.you": "You",
+  "chat.attach": "Attach",
+  "chat.photo": "Photo",
+  "chat.file": "File",
+  "chat.voice": "Voice message",
+  "chat.record": "Record a voice message",
+  "chat.recordCancel": "Cancel",
+  "chat.recordSend": "Send",
+  "chat.micDenied": "Microphone access denied",
+  "chat.micUnsupported": "This browser cannot record audio",
+  "chat.tooLarge": "File is too large (max {n})",
+  "chat.uploadFailed": "Could not send the file",
+  "chat.download": "Download",
+  "chat.caption": "Add a caption...",
+  "chat.attachRemove": "Remove",
+  "chat.uploading": "uploading…",
 
   "stats.title": "Association statistics",
   "stats.desc": "Activity and execution across 50+ sector associations",
@@ -223,6 +259,12 @@ const en: Dictionary = {
   "profile.passwordChanged": "Password updated",
   "profile.passwordError": "Current password is incorrect",
   "profile.passwordShort": "Password must be at least 6 characters",
+  "profile.confirmPassword": "Repeat the new password",
+  "profile.passwordMismatch": "The passwords do not match",
+  "profile.passwordSame": "The new password must differ from the current one",
+  "profile.passwordRule": "Six characters minimum. Choose your own — not your name and the year.",
+  "profile.showPassword": "Show password",
+  "profile.hidePassword": "Hide password",
   "profile.myLogin": "Your login",
   "profile.loginHint": "Colleagues can message you using this login",
 
@@ -237,10 +279,383 @@ const en: Dictionary = {
   "live.newTaskHint": "Your manager has sent you an assignment",
   "live.open": "Open",
 
+  "admin.signIn": "Administration sign-in",
+  "admin.signInHint": "The panel is protected by its own account",
+  "admin.notConfigured": "No administrator password is configured. Set ADMIN_PASSWORD_HASH on the server.",
+  "admin.separateNote": "This account does not open the platform, and a staff account does not open this panel",
+  "admin.title": "Administration",
+  "admin.subtitle": "Staff and system health",
+  "admin.tabStaff": "Staff",
+  "admin.tabPanel": "System panel",
+  "admin.tabChats": "Chats",
+  "admin.conversations": "Conversations",
+  "admin.messages": "Messages",
+  "admin.attachments": "Attachments",
+  "admin.openThread": "Open",
+  "admin.selectThread": "Pick a conversation to read",
+  "admin.noChats": "No conversations yet",
+  "admin.deleteMessage": "Delete message",
+  "admin.confirmDeleteMessage": "This message will be deleted permanently. Continue?",
+  "admin.messageDeleted": "Message deleted",
+  "admin.loadingThread": "Loading...",
+  "admin.readAt": "Read",
+  "admin.unread": "Unread",
+  "admin.newStaff": "New employee",
+  "admin.fullName": "Full name",
+  "admin.login": "Login",
+  "admin.password": "Password",
+  "admin.generate": "Generate",
+  "admin.role": "Access level",
+  "admin.department": "Department",
+  "admin.position": "Position",
+  "admin.manager": "Reports to",
+  "admin.phone": "Phone",
+  "admin.email": "Email",
+  "admin.language": "Language",
+  "admin.noDepartment": "No department",
+  "admin.noManager": "No manager",
+  "admin.create": "Add",
+  "admin.creating": "Adding...",
+  "admin.created": "Employee added",
+  "admin.cancel": "Cancel",
+  "admin.save": "Save",
+  "admin.saved": "Saved",
+  "admin.edit": "Edit",
+  "admin.staffCount": "Staff total",
+  "admin.active": "Active",
+  "admin.inactive": "Disabled",
+  "admin.deactivate": "Disable",
+  "admin.activate": "Enable",
+  "admin.resetPassword": "Reset password",
+  "admin.newPassword": "New password",
+  "admin.passwordSet": "Password set",
+  "admin.copyNow": "Copy it now — it will not be shown again",
+  "admin.confirmDeactivate": "This person will lose access to the system. Continue?",
+  "admin.never": "never",
+  "admin.lastSeen": "Last seen",
+  "admin.tasksCount": "Tasks",
+  "admin.errRequired": "Fill in the required fields",
+  "admin.errLogin": "Login: latin letters, digits, dot and dash (3 to 32 characters)",
+  "admin.errWeak": "Password must be at least 8 characters",
+  "admin.errTaken": "That login is already taken",
+  "admin.errLastRais": "Cannot disable the only Rais",
+  "admin.errSelf": "You cannot disable your own account",
+  "admin.errFailed": "Something went wrong",
+  "admin.system": "System",
+  "admin.database": "Database",
+  "admin.onlineNow": "Online now",
+  "admin.nobodyOnline": "Nobody is online",
+  "admin.recentEvents": "Recent events",
+  "admin.noEvents": "No events",
+  "admin.uptime": "Uptime",
+  "admin.env": "Environment",
+  "admin.nodeVersion": "Node version",
+  "admin.dbSize": "Database size",
+  "admin.tasksByStatus": "Tasks by status",
+  "admin.totalUsers": "Users total",
+  "admin.records": "Records",
+
+  "nav.reports": "Weekly report",
+
+  "nav.meetings": "Meeting conclusions",
+
+  "nav.partners": "AI suggestions",
+
+  "nav.companies": "Companies",
+
+  "nav.agreements": "Agreements",
+
+  "nav.assistant": "AI chat",
+
+  "assistant.title": "AI chat",
+
+  "assistant.desc": "Ask about anything in the system",
+
+  "assistant.empty": "Ask a question",
+
+  "assistant.emptyHint": "Answers come only from the records in the system, with links to each source",
+
+  "assistant.placeholder": "For example: who did we meet last?",
+
+  "assistant.send": "Send",
+
+  "assistant.thinking": "Looking through the data...",
+
+  "assistant.examples": "Example questions",
+
+  "assistant.scope": "Answers use only the records you may see",
+
+  "assistant.tooFast": "Too quick — try again in a minute",
+
+  "assistant.tooComplex": "That question is too complex. Split it in two.",
+
+  "assistant.failed": "No answer came back — the connection to the model dropped. Try again.",
+  "assistant.refused": "The model declined to answer that question.",
+  "assistant.clear": "Clear chat",
+  "assistant.clearConfirm": "Yes, clear",
+  "crm.deleteCompany": "Delete company",
+  "crm.deleteCompanyConfirm": "Yes, delete",
+  "crm.deleteCompanyWarn": "Its contacts and agreements go with it. Meetings are kept, but lose the link.",
+
+  "assistant.q1": "Which agreements are overdue?",
+
+  "assistant.q2": "Which companies did we meet this month?",
+
+  "assistant.q3": "Which companies provide IT services?",
+
+  "assistant.q4": "What do I need to do this week?",
+
+  "crm.companies": "Companies",
+
+  "crm.companiesDesc": "The Assembly's partners and the history with each",
+
+  "crm.newCompany": "Add company",
+
+  "crm.newMeeting": "Add meeting",
+
+  "crm.newContact": "Add contact",
+
+  "crm.selectCompany": "Choose a company",
+  "crm.noCompanyYet": "Add a company first — an agreement is made with someone",
+  "crm.reminderNote": "Give it an owner and a date and the reminder fires on its own — the day before and on the day",
+  "crm.newAgreement": "Add agreement",
+
+  "crm.noCompanies": "No companies yet",
+
+  "crm.status.POTENTIAL": "Potential",
+
+  "crm.status.ACTIVE": "Active",
+
+  "crm.status.PAUSED": "Paused",
+
+  "crm.status.ARCHIVED": "Archived",
+
+  "crm.agr.NEW": "New",
+
+  "crm.agr.IN_PROGRESS": "In progress",
+
+  "crm.agr.DONE": "Done",
+
+  "crm.agr.CANCELLED": "Cancelled",
+
+  "crm.agr.OVERDUE": "Overdue",
+
+  "crm.field.industry": "Industry",
+
+  "crm.field.services": "Services",
+
+  "crm.field.country": "Country",
+
+  "crm.field.city": "City",
+
+  "crm.field.address": "Address",
+
+  "crm.field.website": "Website",
+
+  "crm.field.email": "Email",
+
+  "crm.field.phone": "Phone",
+
+  "crm.field.head": "Head",
+
+  "crm.field.headPosition": "Head position",
+
+  "crm.field.status": "Cooperation status",
+
+  "crm.field.started": "Cooperation since",
+
+  "crm.field.nextContact": "Next contact",
+
+  "crm.field.lastContact": "Last contact",
+
+  "crm.field.owner": "Owner",
+
+  "crm.field.notes": "Notes",
+
+  "crm.field.description": "Description",
+
+  "crm.field.direction": "Direction",
+
+  "crm.tab.meetings": "Meetings",
+
+  "crm.tab.agreements": "Agreements",
+
+  "crm.tab.contacts": "Contacts",
+
+  "crm.agreements": "Agreements",
+
+  "crm.agreementsDesc": "Deadlines and who owes what",
+
+  "crm.today": "Today",
+
+  "reports.thisMonth": "This month",
+
+  "crm.soon": "Soon",
+
+  "crm.overdue": "Overdue",
+
+  "crm.later": "Later",
+
+  "crm.noDeadline": "No deadline",
+
+  "crm.noAgreements": "No open agreements",
+
+  "crm.needsAttention": "Needs attention",
+
+  "crm.participants": "Participants",
+
+  "crm.place": "Place / format",
+
+  "crm.transcript": "Meeting text",
+
+  "crm.analyze": "Analyse with AI",
+
+  "crm.analyzing": "Analysing...",
+
+  "crm.search": "Search",
+
+  "crm.searchHint": "Company, person, meeting, agreement",
+
+  "crm.nothingFound": "Nothing found",
+
+  "crm.markDone": "Done",
+
+  "crm.markProgress": "Start",
+
+  "crm.saved": "Saved",
+
+  "crm.isHead": "Head",
+  "report.title": "Weekly report",
+  "report.subtitle": "Who did what",
+  "report.prevWeek": "Previous week",
+  "report.nextWeek": "Next week",
+  "report.created": "New tasks",
+  "report.done": "Completed",
+  "report.returned": "Returned",
+  "report.overdue": "Overdue",
+  "report.byPerson": "By person",
+  "report.person": "Person",
+  "report.colGiven": "Given",
+  "report.colReceived": "Received",
+  "report.colSubmitted": "Submitted",
+  "report.colDone": "Completed",
+  "report.colReturned": "Returns",
+  "report.colOverdue": "Overdue",
+  "report.colMessages": "Messages",
+  "report.completion": "Completion rate",
+  "report.activeStaff": "Active staff",
+  "report.messages": "Messages",
+  "report.idle": "No activity",
+  "report.everyoneWorked": "Everyone worked",
+  "report.nobody": "No activity this week",
+
+  "admin.tabAgents": "Agents",
+  "agent.title": "AI agents",
+  "agent.subtitle": "Orchestrator: scope, approval and audit",
+  "agent.run": "Run",
+  "agent.running": "Running...",
+  "agent.active": "Active",
+  "agent.planned": "Planned",
+  "agent.dataScope": "Data scope",
+  "agent.actionScope": "Action scope",
+  "agent.approval": "Approval",
+  "agent.budget": "Token budget",
+  "agent.approvalAlways": "Always",
+  "agent.approvalSide": "Only for side effects",
+  "agent.proposals": "Proposals",
+  "agent.pendingOnly": "Pending only",
+  "agent.approve": "Approve",
+  "agent.reject": "Reject",
+  "agent.noProposals": "No proposals",
+  "agent.runs": "Runs",
+  "agent.noRuns": "No records",
+  "agent.contextRows": "Rows",
+  "agent.duration": "Duration",
+  "agent.tokens": "Tokens",
+  "agent.llmOff": "No AI key configured — agents run without it",
+  "agent.blocked": "Blocked",
+  "agent.decidedBy": "Decided by",
+
+  "nav.ai": "AI assistant",
+  "ai.title": "AI assistant",
+  "ai.subtitle": "Turn documents and meetings into assignments",
+  "ai.tabDocument": "Document (PDF)",
+  "ai.tabMeeting": "Meeting",
+  "ai.documentHint": "Upload a document — the AI extracts the assignments and sends them to department heads to check.",
+  "ai.pickPdf": "Choose PDF",
+  "ai.pickFile": "Choose file",
+  "ai.badFormat": "This format is not supported",
+  "ai.noText": "No text found in the file",
+  "ai.unreadable": "Could not read the file",
+  "ai.formats": "PDF, Word, Excel, PowerPoint, photo/scan, text",
+  "ai.analyzing": "Analysing...",
+  "ai.analyze": "Analyse",
+  "ai.onlyPdf": "PDF only",
+  "ai.tooLarge": "File too large (max 20 MB)",
+  "ai.meetingTitle": "Meeting title",
+  "ai.startRecording": "Start recording",
+  "ai.stopRecording": "Stop",
+  "ai.speechLang": "Speech language",
+  "ai.sttOn": "Speech is transcribed live",
+  "ai.sttOff": "This browser cannot transcribe — type the notes instead",
+  "ai.created": "Created",
+  "ai.autoNote": "Assignments are created once the department head approves",
+  "ai.sttDenied": "Speech recognition was not permitted. On macOS enable Dictation (System Settings → Keyboard) and allow Safari the microphone.",
+  "ai.sttNoMic": "The microphone is busy — another app or tab is using it",
+  "ai.sttServer": "Recording audio — transcribed on the server",
+  "ai.sttFallback": "The browser could not transcribe — recording audio, the server will",
+  "ai.transcribing": "Transcribing the recording...",
+  "ai.sttOffline": "Speech recognition is not installed on the server",
+  "ai.sttTooLong": "Recording too long (2 hours maximum)",
+  "ai.sttEmpty": "No speech found in the recording",
+  "ai.sttFailed": "Could not transcribe the recording",
+  "ai.readyToSend": "Recording ready — press Analyse and the server will transcribe it",
+  "ai.recordings": "Meeting recordings",
+  "ai.noRecordings": "No recordings yet",
+  "ai.noAudioKept": "No audio kept — transcript only",
+  "meetings.title": "Meeting conclusions",
+  "meetings.subtitle": "What each meeting settled — in the language you are reading",
+  "meetings.empty": "No meeting has been analysed yet",
+  "meetings.noConclusion": "No stored conclusion for this meeting — only its transcript",
+  "partners.title": "Companies and negotiation history",
+  "partners.subtitle": "What was discussed with whom, and what to propose next time",
+  "partners.empty": "No company has been recorded yet",
+  "partners.propose": "Worth proposing",
+  "partners.history": "Negotiation history",
+  "partners.lastTalk": "Last contact",
+  "partners.kind.muhokama": "discussed",
+  "partners.kind.taklif": "we offered",
+  "partners.kind.ehtiyoj": "they need",
+  "partners.kind.kelishuv": "agreed",
+  "partners.kind.xavf": "risk",
+  "ai.livePicture": "The meeting, live",
+  "ai.liveDecisions": "Decisions",
+  "ai.livePlan": "Plan",
+  "ai.liveQuestions": "Open questions",
+  "ai.status.taklif": "proposed",
+  "ai.status.kelishildi": "agreed",
+  "ai.status.bajarilmoqda": "under way",
+  "ai.remembered": "Remembered",
+  "ai.transcriptPlaceholder": "The transcript appears here and can be edited.",
+  "ai.transcriptShort": "Transcript too short (40 characters minimum)",
+  "ai.keyPoints": "Key points",
+  "ai.drafts": "Drafts",
+  "ai.dropped": "Dropped",
+  "ai.pending": "Awaiting approval",
+  "ai.createTask": "Create task",
+  "ai.edit": "Edit",
+  "ai.saveAndCreate": "Save and create",
+  "ai.cancelEdit": "Cancel",
+  "ai.notAssignable": "You may not assign work to this person",
+  "ai.reviewNote": "Assignments go to the department head first — they check and correct them",
+  "ai.history": "History",
+
   "common.other": "Other",
   "common.all": "All",
   "common.search": "Search",
   "common.save": "Save",
+  "common.add": "Add",
+  "common.delete": "Delete",
   "common.saved": "Saved",
   "common.loading": "Loading...",
   "common.noData": "No data",

@@ -1,9 +1,13 @@
 import type { Dictionary } from "./uz";
 
 const uzc: Dictionary = {
-  "app.name": "ASSAMBLEYA OS",
+  "app.name": "ASSEMBLY OS",
   "app.short": "OS",
   "app.org": "Ўзбекистон Иқтисодиёт Ассамблеяси",
+  "a11y.skipToContent": "Асосий қисмга ўтиш",
+  "notify.title": "Билдиришномалар",
+  "notify.empty": "Янги билдиришнома йўқ",
+  "notify.readAll": "Ҳаммасини ўқилган деб белгилаш",
   "app.tagline": "Бир мақсад. Бир тизим. Бир натижа.",
   "app.subtitle": "Интеграциялашган рақамли бошқарув тизими",
 
@@ -17,12 +21,13 @@ const uzc: Dictionary = {
   "login.rateLimit": "Жуда кўп уриниш. Бироздан сўнг қайта уриниб кўринг.",
   "login.empty": "Логин ва паролни киритинг",
   "login.secure": "Уланиш ҳимояланган • 2FA тайёр",
-  "login.demo": "Демо ҳисоблар",
-  "login.demoHint": "Парол барча демо ҳисоблар учун:",
-  "login.copy": "Нусхалаш",
 
   "nav.dashboard": "Шахсий кабинет",
   "nav.tasks": "Топшириқлар",
+  "nav.group.work": "Иш",
+  "nav.group.partners": "Ҳамкорлар",
+  "nav.group.ai": "AI",
+  "nav.group.manage": "Бошқарув",
   "nav.inbox": "Топшириқ қабул қилиш",
   "nav.execute": "Топшириқни бажариш",
   "nav.assign": "Топшириқ бериш",
@@ -69,6 +74,7 @@ const uzc: Dictionary = {
   "dashboard.overdue": "Муддати ўтган",
   "dashboard.sent": "Юборилган",
   "dashboard.recent": "Сўнгги топшириқлар",
+  "dashboard.noRecent": "Ҳозирча топшириқлар йўқ",
   "dashboard.unread": "Ўқилмаган хабарлар",
   "dashboard.quickActions": "Тезкор амаллар",
   "dashboard.discipline": "Ижро интизоми",
@@ -115,6 +121,10 @@ const uzc: Dictionary = {
   "tasks.returnReason": "Қайта ишлаш учун изоҳ",
   "tasks.filter.all": "Ҳаммаси",
   "tasks.filter.empty": "Ушбу филтр бўйича топшириқ йўқ",
+  "tasks.showMore": "Яна кўрсатиш",
+  "tasks.delete": "Қайтариб олиш",
+  "tasks.deleteConfirm": "Ҳа, ўчирилсин",
+  "tasks.deleteTooLate": "Ходим топшириқни қабул қилиб бўлган — энди изоҳ билан ёпиш керак",
 
   "action.accept": "Қабул қилиш",
   "action.reject": "Рад этиш",
@@ -151,6 +161,17 @@ const uzc: Dictionary = {
   "chat.rais": "Раис билан бевосита алоқа",
   "chat.tabChats": "Суҳбатлар",
   "chat.tabPeople": "Ходимлар",
+  "chat.tabGroups": "Гуруҳлар",
+  "chat.newGroup": "Янги гуруҳ",
+  "chat.groupName": "Гуруҳ номи",
+  "chat.groupMembers": "Аъзолар",
+  "chat.groupCreate": "Яратиш",
+  "chat.groupCreating": "Яратилмоқда...",
+  "chat.noGroups": "Гуруҳлар йўқ",
+  "chat.pickMembers": "Камида битта ходимни танланг",
+  "chat.membersCount": "аъзо",
+  "chat.groupEmpty": "Гуруҳ яратилди — биринчи хабарни ёзинг",
+  "chat.groupCreateError": "Гуруҳ яратилмади",
   "chat.filter": "Логин, исм ёки бўлим",
   "chat.searchHint": "Ходимни рўйхатдан танланг ва ёзинг",
   "chat.start": "Ёзиш",
@@ -172,6 +193,21 @@ const uzc: Dictionary = {
   "chat.selectChat": "Суҳбатни танланг ёки ходимлар рўйхатидан ёзинг",
   "chat.newMessages": "янги",
   "chat.you": "Сиз",
+  "chat.attach": "Бириктириш",
+  "chat.photo": "Расм",
+  "chat.file": "Файл",
+  "chat.voice": "Овозли хабар",
+  "chat.record": "Овозли хабар ёзиш",
+  "chat.recordCancel": "Бекор қилиш",
+  "chat.recordSend": "Юбориш",
+  "chat.micDenied": "Микрофонга рухсат берилмади",
+  "chat.micUnsupported": "Браузер овоз ёзишни қўллаб-қувватламайди",
+  "chat.tooLarge": "Файл жуда катта (максимум {n})",
+  "chat.uploadFailed": "Файлни юбориб бўлмади",
+  "chat.download": "Юклаб олиш",
+  "chat.caption": "Изоҳ қўшиш...",
+  "chat.attachRemove": "Олиб ташлаш",
+  "chat.uploading": "юборилмоқда…",
 
   "stats.title": "Уюшмалар статистикаси",
   "stats.desc": "50+ соҳа уюшмалари кесимида фаоллик ва ижро кўрсаткичлари",
@@ -223,6 +259,12 @@ const uzc: Dictionary = {
   "profile.passwordChanged": "Парол янгиланди",
   "profile.passwordError": "Жорий парол нотўғри",
   "profile.passwordShort": "Парол камида 6 белгидан иборат бўлсин",
+  "profile.confirmPassword": "Янги паролни такрорланг",
+  "profile.passwordMismatch": "Пароллар мос келмади",
+  "profile.passwordSame": "Янги парол эскисидан фарқ қилиши керак",
+  "profile.passwordRule": "Камида 6 белги. Исмингиз ва йилни эмас, ўзингиз ўйлаган паролни киритинг.",
+  "profile.showPassword": "Паролни кўрсатиш",
+  "profile.hidePassword": "Паролни яшириш",
   "profile.myLogin": "Сизнинг логинингиз",
   "profile.loginHint": "Ҳамкасблар сизга шу логин орқали ёзишлари мумкин",
 
@@ -237,10 +279,383 @@ const uzc: Dictionary = {
   "live.newTaskHint": "Раҳбарингиз сизга топшириқ юборди",
   "live.open": "Кўриш",
 
+  "admin.signIn": "Бошқарув панелига кириш",
+  "admin.signInHint": "Панел алоҳида ҳисоб билан ҳимояланган",
+  "admin.notConfigured": "Администратор пароли созланмаган. Серверда ADMIN_PASSWORD_HASH ни белгиланг.",
+  "admin.separateNote": "Бу ҳисоб платформага кирмайди, ходим ҳисоби эса бу панелни очмайди",
+  "admin.title": "Бошқарув панели",
+  "admin.subtitle": "Ходимлар ва тизим ҳолати",
+  "admin.tabStaff": "Ходимлар",
+  "admin.tabPanel": "Тизим панели",
+  "admin.tabChats": "Ёзишмалар",
+  "admin.conversations": "Суҳбатлар",
+  "admin.messages": "Хабарлар",
+  "admin.attachments": "Бириктирмалар",
+  "admin.openThread": "Очиш",
+  "admin.selectThread": "Кўриш учун суҳбатни танланг",
+  "admin.noChats": "Ёзишмалар йўқ",
+  "admin.deleteMessage": "Хабарни ўчириш",
+  "admin.confirmDeleteMessage": "Хабар бутунлай ўчирилади. Давом этасизми?",
+  "admin.messageDeleted": "Хабар ўчирилди",
+  "admin.loadingThread": "Юкланмоқда...",
+  "admin.readAt": "Ўқилган",
+  "admin.unread": "Ўқилмаган",
+  "admin.newStaff": "Янги ходим",
+  "admin.fullName": "Ф.И.Ш.",
+  "admin.login": "Логин",
+  "admin.password": "Парол",
+  "admin.generate": "Яратиш",
+  "admin.role": "Лавозим даражаси",
+  "admin.department": "Бўлим",
+  "admin.position": "Лавозими",
+  "admin.manager": "Раҳбари",
+  "admin.phone": "Телефон",
+  "admin.email": "Email",
+  "admin.language": "Тил",
+  "admin.noDepartment": "Бўлимсиз",
+  "admin.noManager": "Раҳбарсиз",
+  "admin.create": "Қўшиш",
+  "admin.creating": "Қўшилмоқда...",
+  "admin.created": "Ходим қўшилди",
+  "admin.cancel": "Бекор қилиш",
+  "admin.save": "Сақлаш",
+  "admin.saved": "Сақланди",
+  "admin.edit": "Таҳрирлаш",
+  "admin.staffCount": "Жами ходимлар",
+  "admin.active": "Фаол",
+  "admin.inactive": "Фаол эмас",
+  "admin.deactivate": "Фаолсизлантириш",
+  "admin.activate": "Фаоллаштириш",
+  "admin.resetPassword": "Паролни алмаштириш",
+  "admin.newPassword": "Янги парол",
+  "admin.passwordSet": "Парол ўрнатилди",
+  "admin.copyNow": "Ҳозир нусха олинг — парол бошқа кўрсатилмайди",
+  "admin.confirmDeactivate": "Ушбу ходим тизимга кира олмайди. Давом этасизми?",
+  "admin.never": "ҳеч қачон",
+  "admin.lastSeen": "Охирги ташриф",
+  "admin.tasksCount": "Топшириқлар",
+  "admin.errRequired": "Барча мажбурий майдонларни тўлдиринг",
+  "admin.errLogin": "Логин фақат лотин ҳарфлари, рақамлар, нуқта ва чизиқчадан иборат бўлсин (3-32 белги)",
+  "admin.errWeak": "Парол камида 8 белгидан иборат бўлсин",
+  "admin.errTaken": "Бундай логин аллақачон мавжуд",
+  "admin.errLastRais": "Ягона Раисни ўчириб бўлмайди",
+  "admin.errSelf": "Ўз ҳисобингизни фаолсизлантира олмайсиз",
+  "admin.errFailed": "Хатолик юз берди",
+  "admin.system": "Тизим",
+  "admin.database": "Маълумотлар базаси",
+  "admin.onlineNow": "Ҳозир тармоқда",
+  "admin.nobodyOnline": "Ҳеч ким тармоқда эмас",
+  "admin.recentEvents": "Сўнгги ҳодисалар",
+  "admin.noEvents": "Ҳодисалар йўқ",
+  "admin.uptime": "Ишлаш вақти",
+  "admin.env": "Муҳит",
+  "admin.nodeVersion": "Node версияси",
+  "admin.dbSize": "База ҳажми",
+  "admin.tasksByStatus": "Ҳолат бўйича топшириқлар",
+  "admin.totalUsers": "Жами фойдаланувчилар",
+  "admin.records": "Ёзувлар",
+
+  "nav.reports": "Ҳафталик ҳисобот",
+
+  "nav.meetings": "Учрашув хулосалари",
+
+  "nav.partners": "AI таклифлари",
+
+  "nav.companies": "Kompaniyalar",
+
+  "nav.agreements": "Kelishuvlar",
+
+  "nav.assistant": "AI суҳбат",
+
+  "assistant.title": "AI суҳбат",
+
+  "assistant.desc": "Тизимдаги маълумотлар бўйича савол беринг",
+
+  "assistant.empty": "Саволингизни ёзинг",
+
+  "assistant.emptyHint": "Жавоб фақат тизимдаги ёзувларга асосланади ва манбаларга ҳавола билан келади",
+
+  "assistant.placeholder": "Масалан: охирги марта қайси компания билан учрашдик?",
+
+  "assistant.send": "Юбориш",
+
+  "assistant.thinking": "Маълумотлар қидирилмоқда...",
+
+  "assistant.examples": "Савол намуналари",
+
+  "assistant.scope": "Жавоблар фақат сиз кўра оладиган ёзувлар асосида",
+
+  "assistant.tooFast": "Жуда тез — бир дақиқадан сўнг уриниб кўринг",
+
+  "assistant.tooComplex": "Савол жуда мураккаб. Уни иккига бўлинг.",
+
+  "assistant.failed": "Жавоб келмади — модель билан алоқа узилди. Қайта уриниб кўринг.",
+  "assistant.refused": "Модель бу саволга жавоб беришдан бош тортди.",
+  "assistant.clear": "Чатни тозалаш",
+  "assistant.clearConfirm": "Ҳа, тозалансин",
+  "crm.deleteCompany": "Компанияни ўчириш",
+  "crm.deleteCompanyConfirm": "Ҳа, ўчирилсин",
+  "crm.deleteCompanyWarn": "Компания билан бирга унинг контактлари ва келишувлари ўчади. Учрашувлар сақланади, лекин боғланиши йўқолади.",
+
+  "assistant.q1": "Қайси келишувлар муддати ўтган?",
+
+  "assistant.q2": "Бу ой қайси компаниялар билан учрашдик?",
+
+  "assistant.q3": "Қайси компаниялар IT хизматларини кўрсатади?",
+
+  "assistant.q4": "Шу ҳафта нима қилишим керак?",
+
+  "crm.companies": "Kompaniyalar",
+
+  "crm.companiesDesc": "Assambleya hamkorlari va ular bilan munosabatlar tarixi",
+
+  "crm.newCompany": "Kompaniya qo'shish",
+
+  "crm.newMeeting": "Uchrashuv qo'shish",
+
+  "crm.newContact": "Kontakt qo'shish",
+
+  "crm.selectCompany": "Компанияни танланг",
+  "crm.noCompanyYet": "Аввал компания қўшинг — келишув кимдир билан тузилади",
+  "crm.reminderNote": "Масъул ва муддат кўрсатилса, эслатма ўзи келади — бир кун олдин ва муддат куни",
+  "crm.newAgreement": "Kelishuv qo'shish",
+
+  "crm.noCompanies": "Hali kompaniya kiritilmagan",
+
+  "crm.status.POTENTIAL": "Potensial",
+
+  "crm.status.ACTIVE": "Faol",
+
+  "crm.status.PAUSED": "To'xtatilgan",
+
+  "crm.status.ARCHIVED": "Arxiv",
+
+  "crm.agr.NEW": "Yangi",
+
+  "crm.agr.IN_PROGRESS": "Jarayonda",
+
+  "crm.agr.DONE": "Bajarilgan",
+
+  "crm.agr.CANCELLED": "Bekor qilingan",
+
+  "crm.agr.OVERDUE": "Muddati o'tgan",
+
+  "crm.field.industry": "Soha",
+
+  "crm.field.services": "Xizmatlar",
+
+  "crm.field.country": "Davlat",
+
+  "crm.field.city": "Shahar",
+
+  "crm.field.address": "Manzil",
+
+  "crm.field.website": "Veb-sayt",
+
+  "crm.field.email": "Email",
+
+  "crm.field.phone": "Telefon",
+
+  "crm.field.head": "Rahbar",
+
+  "crm.field.headPosition": "Rahbar lavozimi",
+
+  "crm.field.status": "Hamkorlik holati",
+
+  "crm.field.started": "Hamkorlik boshlangan",
+
+  "crm.field.nextContact": "Keyingi aloqa",
+
+  "crm.field.lastContact": "So'nggi aloqa",
+
+  "crm.field.owner": "Mas'ul xodim",
+
+  "crm.field.notes": "Izohlar",
+
+  "crm.field.description": "Qisqacha",
+
+  "crm.field.direction": "Yo'nalish",
+
+  "crm.tab.meetings": "Uchrashuvlar",
+
+  "crm.tab.agreements": "Kelishuvlar",
+
+  "crm.tab.contacts": "Kontaktlar",
+
+  "crm.agreements": "Kelishuvlar",
+
+  "crm.agreementsDesc": "Muddatlar va mas'ullar bo'yicha nazorat",
+
+  "crm.today": "Bugun",
+
+  "reports.thisMonth": "Шу ой",
+
+  "crm.soon": "Yaqin kunlarda",
+
+  "crm.overdue": "Muddati o'tgan",
+
+  "crm.later": "Keyinroq",
+
+  "crm.noDeadline": "Muddatsiz",
+
+  "crm.noAgreements": "Ochiq kelishuvlar yo'q",
+
+  "crm.needsAttention": "E'tibor talab qiladi",
+
+  "crm.participants": "Ishtirokchilar",
+
+  "crm.place": "Joy / format",
+
+  "crm.transcript": "Uchrashuv matni",
+
+  "crm.analyze": "AI bilan tahlil qilish",
+
+  "crm.analyzing": "Tahlil qilinmoqda...",
+
+  "crm.search": "Qidirish",
+
+  "crm.searchHint": "Kompaniya, odam, uchrashuv, kelishuv",
+
+  "crm.nothingFound": "Hech narsa topilmadi",
+
+  "crm.markDone": "Bajarildi",
+
+  "crm.markProgress": "Jarayonga olish",
+
+  "crm.saved": "Saqlandi",
+
+  "crm.isHead": "Rahbar",
+  "report.title": "Ҳафталик ҳисобот",
+  "report.subtitle": "Ким қандай ишлади",
+  "report.prevWeek": "Олдинги ҳафта",
+  "report.nextWeek": "Кейинги ҳафта",
+  "report.created": "Янги топшириқлар",
+  "report.done": "Бажарилди",
+  "report.returned": "Қайтарилди",
+  "report.overdue": "Муддати ўтган",
+  "report.byPerson": "Ходимлар бўйича",
+  "report.person": "Ходим",
+  "report.colGiven": "Берди",
+  "report.colReceived": "Олди",
+  "report.colSubmitted": "Топширди",
+  "report.colDone": "Бажарди",
+  "report.colReturned": "Қайтарилган",
+  "report.colOverdue": "Муддати ўтган",
+  "report.colMessages": "Хабарлар",
+  "report.completion": "Бажарилиш даражаси",
+  "report.activeStaff": "Фаол ходимлар",
+  "report.messages": "Хабарлар",
+  "report.idle": "Ҳаракатсиз",
+  "report.everyoneWorked": "Ҳамма ишлади",
+  "report.nobody": "Бу ҳафтада ҳаракат бўлмади",
+
+  "admin.tabAgents": "Агентлар",
+  "agent.title": "AI агентлар",
+  "agent.subtitle": "Оркестратор: доира, тасдиқ ва аудит",
+  "agent.run": "Ишга тушириш",
+  "agent.running": "Бажарилмоқда...",
+  "agent.active": "Фаол",
+  "agent.planned": "Режада",
+  "agent.dataScope": "Маълумот доираси",
+  "agent.actionScope": "Ҳаракат доираси",
+  "agent.approval": "Тасдиқ",
+  "agent.budget": "Токен лимити",
+  "agent.approvalAlways": "Ҳар доим",
+  "agent.approvalSide": "Фақат ташқи таъсирда",
+  "agent.proposals": "Таклифлар",
+  "agent.pendingOnly": "Фақат кутилаётган",
+  "agent.approve": "Тасдиқлаш",
+  "agent.reject": "Рад этиш",
+  "agent.noProposals": "Таклифлар йўқ",
+  "agent.runs": "Ишга туширишлар",
+  "agent.noRuns": "Ёзувлар йўқ",
+  "agent.contextRows": "Қаторлар",
+  "agent.duration": "Давомийлик",
+  "agent.tokens": "Токенлар",
+  "agent.llmOff": "AI калити созланмаган — агентлар калитсиз ҳам ишлайди",
+  "agent.blocked": "Тўхтатилди",
+  "agent.decidedBy": "Ким қарор қилди",
+
+  "nav.ai": "AI ёрдамчи",
+  "ai.title": "AI ёрдамчи",
+  "ai.subtitle": "Ҳужжат ва учрашувдан топшириқ ажратиш",
+  "ai.tabDocument": "Ҳужжат (PDF)",
+  "ai.tabMeeting": "Учрашув",
+  "ai.documentHint": "Ҳужжат юборинг — AI топшириқларни ажратиб, бўлим раҳбарларига текшириш учун юборади.",
+  "ai.pickPdf": "PDF танлаш",
+  "ai.pickFile": "Файл танлаш",
+  "ai.badFormat": "Бу формат қўллаб-қувватланмайди",
+  "ai.noText": "Файлда матн топилмади",
+  "ai.unreadable": "Файлни ўқиб бўлмади",
+  "ai.formats": "PDF, Word, Excel, PowerPoint, расм/скан, матн",
+  "ai.analyzing": "Таҳлил қилинмоқда...",
+  "ai.analyze": "Таҳлил қилиш",
+  "ai.onlyPdf": "Фақат PDF қабул қилинади",
+  "ai.tooLarge": "Файл жуда катта (макс. 20 MB)",
+  "ai.meetingTitle": "Учрашув номи",
+  "ai.startRecording": "Ёзишни бошлаш",
+  "ai.stopRecording": "Тўхтатиш",
+  "ai.speechLang": "Нутқ тили",
+  "ai.sttOn": "Нутқ матнга ўгирилади",
+  "ai.sttOff": "Браузер нутқни танимайди — матнни қўлда киритинг",
+  "ai.created": "Яратилди",
+  "ai.autoNote": "Топшириқлар бўлим раҳбари тасдиқлагач яратилади",
+  "ai.sttDenied": "Нутқни танишга рухсат берилмади. macOS: Тизим созламалари → Клавиатура → Диктовка ёқилсин, Safari учун микрофон рухсати берилсин.",
+  "ai.sttNoMic": "Микрофон банд — уни бошқа дастур ёки очиқ варақ ишлатмоқда",
+  "ai.sttServer": "Овоз ёзиб олинади ва серверда матнга ўгирилади",
+  "ai.sttFallback": "Браузер нутқни танимади — овоз ёзилмоқда, матнга сервер ўгиради",
+  "ai.transcribing": "Овоз матнга ўгирилмоқда...",
+  "ai.sttOffline": "Серверда нутқни таниш модули ўрнатилмаган",
+  "ai.sttTooLong": "Ёзув жуда узун (макс. 2 соат)",
+  "ai.sttEmpty": "Ёзувда нутқ топилмади",
+  "ai.sttFailed": "Овозни матнга ўгириб бўлмади",
+  "ai.readyToSend": "Ёзув тайёр — «Таҳлил қилиш» тугмасини босинг, матн серверда тайёрланади",
+  "ai.recordings": "Учрашув ёзувлари",
+  "ai.noRecordings": "Ҳали ёзув йўқ",
+  "ai.noAudioKept": "Овоз сақланмаган — фақат матн",
+  "meetings.title": "Учрашув хулосалари",
+  "meetings.subtitle": "Ҳар бир учрашув нима билан якунлангани — сиз ўқиётган тилда",
+  "meetings.empty": "Ҳали бирорта учрашув таҳлил қилинмаган",
+  "meetings.noConclusion": "Бу учрашув хулосаси сақланмаган — фақат баённомаси бор",
+  "partners.title": "Компаниялар ва музокаралар тарихи",
+  "partners.subtitle": "Ким билан нима муҳокама қилинган ва кейинги сафар нима таклиф қилиш мумкин",
+  "partners.empty": "Ҳали бирорта компания ҳақида ёзув йўқ",
+  "partners.propose": "Таклиф қилиш мумкин",
+  "partners.history": "Музокаралар тарихи",
+  "partners.lastTalk": "Сўнгги мулоқот",
+  "partners.kind.muhokama": "муҳокама",
+  "partners.kind.taklif": "таклиф қилдик",
+  "partners.kind.ehtiyoj": "уларга керак",
+  "partners.kind.kelishuv": "келишилди",
+  "partners.kind.xavf": "хавф",
+  "ai.livePicture": "Учрашув жонли таҳлили",
+  "ai.liveDecisions": "Қарорлар",
+  "ai.livePlan": "Режа",
+  "ai.liveQuestions": "Очиқ саволлар",
+  "ai.status.taklif": "таклиф",
+  "ai.status.kelishildi": "келишилди",
+  "ai.status.bajarilmoqda": "бажарилмоқда",
+  "ai.remembered": "Эсда сақланди",
+  "ai.transcriptPlaceholder": "Баённома шу ерда пайдо бўлади. Таҳрирлаш мумкин.",
+  "ai.transcriptShort": "Матн жуда қисқа (камида 40 белги)",
+  "ai.keyPoints": "Асосий нуқталар",
+  "ai.drafts": "Таклифлар",
+  "ai.dropped": "Рад этилди",
+  "ai.pending": "Тасдиқ кутилмоқда",
+  "ai.createTask": "Топшириқ яратиш",
+  "ai.edit": "Таҳрирлаш",
+  "ai.saveAndCreate": "Сақлаш ва яратиш",
+  "ai.cancelEdit": "Бекор қилиш",
+  "ai.notAssignable": "Бу ходимга топшириқ бериш ҳуқуқингиз йўқ",
+  "ai.reviewNote": "Топшириқлар аввал бўлим раҳбарига боради — у текширади ва хатоларни тузатади",
+  "ai.history": "Тарих",
+
   "common.other": "Бошқалар",
   "common.all": "Барчаси",
   "common.search": "Қидириш",
   "common.save": "Сақлаш",
+  "common.add": "Қўшиш",
+  "common.delete": "Ўчириш",
   "common.saved": "Сақланди",
   "common.loading": "Юкланмоқда...",
   "common.noData": "Маълумот йўқ",

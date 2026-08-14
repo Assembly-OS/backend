@@ -1,9 +1,13 @@
 import type { Dictionary } from "./uz";
 
 const ru: Dictionary = {
-  "app.name": "ASSAMBLEYA OS",
+  "app.name": "ASSEMBLY OS",
   "app.short": "OS",
   "app.org": "Ассамблея экономики Узбекистана",
+  "a11y.skipToContent": "Перейти к содержимому",
+  "notify.title": "Уведомления",
+  "notify.empty": "Новых уведомлений нет",
+  "notify.readAll": "Отметить все прочитанными",
   "app.tagline": "Одна цель. Одна система. Один результат.",
   "app.subtitle": "Интегрированная цифровая система управления",
 
@@ -17,12 +21,13 @@ const ru: Dictionary = {
   "login.rateLimit": "Слишком много попыток. Повторите позже.",
   "login.empty": "Введите логин и пароль",
   "login.secure": "Соединение защищено • 2FA готов",
-  "login.demo": "Демо-учётные записи",
-  "login.demoHint": "Пароль для всех демо-аккаунтов:",
-  "login.copy": "Копировать",
 
   "nav.dashboard": "Личный кабинет",
   "nav.tasks": "Поручения",
+  "nav.group.work": "Работа",
+  "nav.group.partners": "Партнёры",
+  "nav.group.ai": "AI",
+  "nav.group.manage": "Управление",
   "nav.inbox": "Приём поручений",
   "nav.execute": "Исполнение поручений",
   "nav.assign": "Выдача поручений",
@@ -69,6 +74,7 @@ const ru: Dictionary = {
   "dashboard.overdue": "Просрочено",
   "dashboard.sent": "Отправлено",
   "dashboard.recent": "Последние поручения",
+  "dashboard.noRecent": "Поручений пока нет",
   "dashboard.unread": "Непрочитанные сообщения",
   "dashboard.quickActions": "Быстрые действия",
   "dashboard.discipline": "Исполнительская дисциплина",
@@ -115,6 +121,10 @@ const ru: Dictionary = {
   "tasks.returnReason": "Комментарий к доработке",
   "tasks.filter.all": "Все",
   "tasks.filter.empty": "По этому фильтру поручений нет",
+  "tasks.showMore": "Показать ещё",
+  "tasks.delete": "Отозвать",
+  "tasks.deleteConfirm": "Да, удалить",
+  "tasks.deleteTooLate": "Сотрудник уже принял поручение — теперь его нужно закрыть с комментарием",
 
   "action.accept": "Принять",
   "action.reject": "Отклонить",
@@ -151,6 +161,17 @@ const ru: Dictionary = {
   "chat.rais": "Прямая связь с Раисом",
   "chat.tabChats": "Диалоги",
   "chat.tabPeople": "Сотрудники",
+  "chat.tabGroups": "Группы",
+  "chat.newGroup": "Новая группа",
+  "chat.groupName": "Название группы",
+  "chat.groupMembers": "Участники",
+  "chat.groupCreate": "Создать",
+  "chat.groupCreating": "Создание...",
+  "chat.noGroups": "Групп пока нет",
+  "chat.pickMembers": "Выберите хотя бы одного сотрудника",
+  "chat.membersCount": "участн.",
+  "chat.groupEmpty": "Группа создана — напишите первое сообщение",
+  "chat.groupCreateError": "Не удалось создать группу",
   "chat.filter": "Логин, имя или отдел",
   "chat.searchHint": "Выберите сотрудника из списка и напишите ему",
   "chat.start": "Написать",
@@ -172,6 +193,21 @@ const ru: Dictionary = {
   "chat.selectChat": "Выберите диалог или напишите сотруднику из списка",
   "chat.newMessages": "новых",
   "chat.you": "Вы",
+  "chat.attach": "Прикрепить",
+  "chat.photo": "Фото",
+  "chat.file": "Файл",
+  "chat.voice": "Голосовое сообщение",
+  "chat.record": "Записать голосовое",
+  "chat.recordCancel": "Отменить",
+  "chat.recordSend": "Отправить",
+  "chat.micDenied": "Нет доступа к микрофону",
+  "chat.micUnsupported": "Браузер не поддерживает запись звука",
+  "chat.tooLarge": "Файл слишком большой (максимум {n})",
+  "chat.uploadFailed": "Не удалось отправить файл",
+  "chat.download": "Скачать",
+  "chat.caption": "Добавить подпись...",
+  "chat.attachRemove": "Убрать",
+  "chat.uploading": "отправляется…",
 
   "stats.title": "Статистика объединений",
   "stats.desc": "Активность и исполнение в разрезе 50+ отраслевых объединений",
@@ -223,6 +259,12 @@ const ru: Dictionary = {
   "profile.passwordChanged": "Пароль обновлён",
   "profile.passwordError": "Текущий пароль неверен",
   "profile.passwordShort": "Пароль должен быть не короче 6 символов",
+  "profile.confirmPassword": "Повторите новый пароль",
+  "profile.passwordMismatch": "Пароли не совпадают",
+  "profile.passwordSame": "Новый пароль должен отличаться от текущего",
+  "profile.passwordRule": "Не короче 6 символов. Придумайте свой — не имя и год.",
+  "profile.showPassword": "Показать пароль",
+  "profile.hidePassword": "Скрыть пароль",
   "profile.myLogin": "Ваш логин",
   "profile.loginHint": "Коллеги могут написать вам, зная этот логин",
 
@@ -237,10 +279,383 @@ const ru: Dictionary = {
   "live.newTaskHint": "Руководитель выдал вам поручение",
   "live.open": "Открыть",
 
+  "admin.signIn": "Вход в панель управления",
+  "admin.signInHint": "Панель защищена отдельной учётной записью",
+  "admin.notConfigured": "Пароль администратора не настроен. Задайте ADMIN_PASSWORD_HASH на сервере.",
+  "admin.separateNote": "Эта учётная запись не пускает в платформу, а учётка сотрудника не открывает панель",
+  "admin.title": "Панель управления",
+  "admin.subtitle": "Сотрудники и состояние системы",
+  "admin.tabStaff": "Сотрудники",
+  "admin.tabPanel": "Панель системы",
+  "admin.tabChats": "Переписка",
+  "admin.conversations": "Диалоги",
+  "admin.messages": "Сообщений",
+  "admin.attachments": "Вложений",
+  "admin.openThread": "Открыть",
+  "admin.selectThread": "Выберите диалог для просмотра",
+  "admin.noChats": "Переписки пока нет",
+  "admin.deleteMessage": "Удалить сообщение",
+  "admin.confirmDeleteMessage": "Сообщение будет удалено безвозвратно. Продолжить?",
+  "admin.messageDeleted": "Сообщение удалено",
+  "admin.loadingThread": "Загрузка...",
+  "admin.readAt": "Прочитано",
+  "admin.unread": "Не прочитано",
+  "admin.newStaff": "Новый сотрудник",
+  "admin.fullName": "Ф.И.О.",
+  "admin.login": "Логин",
+  "admin.password": "Пароль",
+  "admin.generate": "Сгенерировать",
+  "admin.role": "Уровень доступа",
+  "admin.department": "Департамент",
+  "admin.position": "Должность",
+  "admin.manager": "Руководитель",
+  "admin.phone": "Телефон",
+  "admin.email": "Email",
+  "admin.language": "Язык",
+  "admin.noDepartment": "Без департамента",
+  "admin.noManager": "Без руководителя",
+  "admin.create": "Добавить",
+  "admin.creating": "Добавление...",
+  "admin.created": "Сотрудник добавлен",
+  "admin.cancel": "Отмена",
+  "admin.save": "Сохранить",
+  "admin.saved": "Сохранено",
+  "admin.edit": "Изменить",
+  "admin.staffCount": "Всего сотрудников",
+  "admin.active": "Активен",
+  "admin.inactive": "Отключён",
+  "admin.deactivate": "Отключить",
+  "admin.activate": "Включить",
+  "admin.resetPassword": "Сменить пароль",
+  "admin.newPassword": "Новый пароль",
+  "admin.passwordSet": "Пароль установлен",
+  "admin.copyNow": "Скопируйте сейчас — пароль больше не будет показан",
+  "admin.confirmDeactivate": "Сотрудник потеряет доступ к системе. Продолжить?",
+  "admin.never": "никогда",
+  "admin.lastSeen": "Был(а) в сети",
+  "admin.tasksCount": "Задачи",
+  "admin.errRequired": "Заполните обязательные поля",
+  "admin.errLogin": "Логин: латиница, цифры, точка и дефис (от 3 до 32 символов)",
+  "admin.errWeak": "Пароль не короче 8 символов",
+  "admin.errTaken": "Такой логин уже занят",
+  "admin.errLastRais": "Нельзя отключить единственного Раиса",
+  "admin.errSelf": "Нельзя отключить собственную учётную запись",
+  "admin.errFailed": "Не удалось выполнить",
+  "admin.system": "Система",
+  "admin.database": "База данных",
+  "admin.onlineNow": "Сейчас в сети",
+  "admin.nobodyOnline": "Никого нет в сети",
+  "admin.recentEvents": "Последние события",
+  "admin.noEvents": "Событий нет",
+  "admin.uptime": "Время работы",
+  "admin.env": "Окружение",
+  "admin.nodeVersion": "Версия Node",
+  "admin.dbSize": "Размер базы",
+  "admin.tasksByStatus": "Задачи по статусам",
+  "admin.totalUsers": "Всего пользователей",
+  "admin.records": "Записей",
+
+  "nav.reports": "Отчёт за неделю",
+
+  "nav.meetings": "Выводы совещаний",
+
+  "nav.partners": "AI-подсказки",
+
+  "nav.companies": "Компании",
+
+  "nav.agreements": "Договорённости",
+
+  "nav.assistant": "AI-чат",
+
+  "assistant.title": "AI-чат",
+
+  "assistant.desc": "Вопросы по данным системы",
+
+  "assistant.empty": "Задайте вопрос",
+
+  "assistant.emptyHint": "Ответ строится только по записям системы и приходит со ссылками на источники",
+
+  "assistant.placeholder": "Например: с кем мы встречались последний раз?",
+
+  "assistant.send": "Отправить",
+
+  "assistant.thinking": "Ищу в данных...",
+
+  "assistant.examples": "Примеры вопросов",
+
+  "assistant.scope": "Ответы строятся только по записям, доступным вам",
+
+  "assistant.tooFast": "Слишком часто — попробуйте через минуту",
+
+  "assistant.tooComplex": "Вопрос слишком сложный. Разбейте его на два.",
+
+  "assistant.failed": "Ответ не пришёл — связь с моделью прервалась. Попробуйте ещё раз.",
+  "assistant.refused": "Модель отказалась отвечать на этот вопрос.",
+  "assistant.clear": "Очистить чат",
+  "assistant.clearConfirm": "Да, очистить",
+  "crm.deleteCompany": "Удалить компанию",
+  "crm.deleteCompanyConfirm": "Да, удалить",
+  "crm.deleteCompanyWarn": "Вместе с компанией удалятся её контакты и договорённости. Совещания сохранятся, но потеряют привязку.",
+
+  "assistant.q1": "Какие договорённости просрочены?",
+
+  "assistant.q2": "С какими компаниями встречались в этом месяце?",
+
+  "assistant.q3": "Какие компании оказывают IT-услуги?",
+
+  "assistant.q4": "Что мне нужно сделать на этой неделе?",
+
+  "crm.companies": "Компании",
+
+  "crm.companiesDesc": "Партнёры Ассамблеи и история отношений с каждым",
+
+  "crm.newCompany": "Добавить компанию",
+
+  "crm.newMeeting": "Добавить совещание",
+
+  "crm.newContact": "Добавить контакт",
+
+  "crm.selectCompany": "Выберите компанию",
+  "crm.noCompanyYet": "Сначала добавьте компанию — договорённость заключается с кем-то",
+  "crm.reminderNote": "С исполнителем и сроком напоминание придёт само — за день и в день срока",
+  "crm.newAgreement": "Добавить договорённость",
+
+  "crm.noCompanies": "Компании пока не заведены",
+
+  "crm.status.POTENTIAL": "Потенциальный",
+
+  "crm.status.ACTIVE": "Активный",
+
+  "crm.status.PAUSED": "Приостановлен",
+
+  "crm.status.ARCHIVED": "Архив",
+
+  "crm.agr.NEW": "Новая",
+
+  "crm.agr.IN_PROGRESS": "В процессе",
+
+  "crm.agr.DONE": "Выполнена",
+
+  "crm.agr.CANCELLED": "Отменена",
+
+  "crm.agr.OVERDUE": "Просрочена",
+
+  "crm.field.industry": "Отрасль",
+
+  "crm.field.services": "Услуги",
+
+  "crm.field.country": "Страна",
+
+  "crm.field.city": "Город",
+
+  "crm.field.address": "Адрес",
+
+  "crm.field.website": "Сайт",
+
+  "crm.field.email": "Email",
+
+  "crm.field.phone": "Телефон",
+
+  "crm.field.head": "Руководитель",
+
+  "crm.field.headPosition": "Должность руководителя",
+
+  "crm.field.status": "Статус сотрудничества",
+
+  "crm.field.started": "Начало сотрудничества",
+
+  "crm.field.nextContact": "Следующий контакт",
+
+  "crm.field.lastContact": "Последний контакт",
+
+  "crm.field.owner": "Ответственный",
+
+  "crm.field.notes": "Заметки",
+
+  "crm.field.description": "Краткое описание",
+
+  "crm.field.direction": "Направление",
+
+  "crm.tab.meetings": "Совещания",
+
+  "crm.tab.agreements": "Договорённости",
+
+  "crm.tab.contacts": "Контакты",
+
+  "crm.agreements": "Договорённости",
+
+  "crm.agreementsDesc": "Контроль сроков и ответственных",
+
+  "crm.today": "Сегодня",
+
+  "reports.thisMonth": "В этом месяце",
+
+  "crm.soon": "Скоро",
+
+  "crm.overdue": "Просрочено",
+
+  "crm.later": "Позже",
+
+  "crm.noDeadline": "Без срока",
+
+  "crm.noAgreements": "Открытых договорённостей нет",
+
+  "crm.needsAttention": "Требует внимания",
+
+  "crm.participants": "Участники",
+
+  "crm.place": "Место / формат",
+
+  "crm.transcript": "Текст совещания",
+
+  "crm.analyze": "Проанализировать с помощью AI",
+
+  "crm.analyzing": "Анализируем...",
+
+  "crm.search": "Поиск",
+
+  "crm.searchHint": "Компания, человек, совещание, договорённость",
+
+  "crm.nothingFound": "Ничего не найдено",
+
+  "crm.markDone": "Выполнено",
+
+  "crm.markProgress": "В работу",
+
+  "crm.saved": "Сохранено",
+
+  "crm.isHead": "Руководитель",
+  "report.title": "Отчёт за неделю",
+  "report.subtitle": "Кто и как работал",
+  "report.prevWeek": "Предыдущая неделя",
+  "report.nextWeek": "Следующая неделя",
+  "report.created": "Новые задачи",
+  "report.done": "Выполнено",
+  "report.returned": "Возвращено",
+  "report.overdue": "Просрочено",
+  "report.byPerson": "По сотрудникам",
+  "report.person": "Сотрудник",
+  "report.colGiven": "Выдал",
+  "report.colReceived": "Получил",
+  "report.colSubmitted": "Сдал",
+  "report.colDone": "Выполнил",
+  "report.colReturned": "Возвраты",
+  "report.colOverdue": "Просрочено",
+  "report.colMessages": "Сообщений",
+  "report.completion": "Уровень выполнения",
+  "report.activeStaff": "Активных сотрудников",
+  "report.messages": "Сообщений",
+  "report.idle": "Без активности",
+  "report.everyoneWorked": "Работали все",
+  "report.nobody": "На этой неделе активности не было",
+
+  "admin.tabAgents": "Агенты",
+  "agent.title": "AI-агенты",
+  "agent.subtitle": "Оркестратор: границы, подтверждение и аудит",
+  "agent.run": "Запустить",
+  "agent.running": "Выполняется...",
+  "agent.active": "Активен",
+  "agent.planned": "В плане",
+  "agent.dataScope": "Доступ к данным",
+  "agent.actionScope": "Разрешённые действия",
+  "agent.approval": "Подтверждение",
+  "agent.budget": "Лимит токенов",
+  "agent.approvalAlways": "Всегда",
+  "agent.approvalSide": "Только при внешнем эффекте",
+  "agent.proposals": "Предложения",
+  "agent.pendingOnly": "Только ожидающие",
+  "agent.approve": "Подтвердить",
+  "agent.reject": "Отклонить",
+  "agent.noProposals": "Предложений нет",
+  "agent.runs": "Запуски",
+  "agent.noRuns": "Записей нет",
+  "agent.contextRows": "Строк",
+  "agent.duration": "Длительность",
+  "agent.tokens": "Токенов",
+  "agent.llmOff": "Ключ AI не настроен — агенты работают и без него",
+  "agent.blocked": "Остановлен",
+  "agent.decidedBy": "Кто решил",
+
+  "nav.ai": "AI-помощник",
+  "ai.title": "AI-помощник",
+  "ai.subtitle": "Задачи из документов и совещаний",
+  "ai.tabDocument": "Документ (PDF)",
+  "ai.tabMeeting": "Совещание",
+  "ai.documentHint": "Загрузите документ — ИИ выделит поручения и отправит их руководителям отделов на проверку.",
+  "ai.pickPdf": "Выбрать PDF",
+  "ai.pickFile": "Выбрать файл",
+  "ai.badFormat": "Этот формат не поддерживается",
+  "ai.noText": "В файле не найден текст",
+  "ai.unreadable": "Не удалось прочитать файл",
+  "ai.formats": "PDF, Word, Excel, PowerPoint, фото/скан, текст",
+  "ai.analyzing": "Анализируем...",
+  "ai.analyze": "Анализировать",
+  "ai.onlyPdf": "Принимается только PDF",
+  "ai.tooLarge": "Файл слишком большой (макс. 20 МБ)",
+  "ai.meetingTitle": "Название совещания",
+  "ai.startRecording": "Начать запись",
+  "ai.stopRecording": "Остановить",
+  "ai.speechLang": "Язык речи",
+  "ai.sttOn": "Речь переводится в текст",
+  "ai.sttOff": "Браузер не распознаёт речь — введите текст вручную",
+  "ai.created": "Создано",
+  "ai.autoNote": "Поручения создаются после проверки руководителем отдела",
+  "ai.sttDenied": "Распознавание речи не разрешено. На macOS включите «Диктовку» (Системные настройки → Клавиатура) и разрешите Safari микрофон.",
+  "ai.sttNoMic": "Микрофон занят — его использует другое приложение или вкладка",
+  "ai.sttServer": "Записываем звук — расшифровка на сервере",
+  "ai.sttFallback": "Браузер не распознал речь — идёт запись звука, расшифрует сервер",
+  "ai.transcribing": "Расшифровываем запись...",
+  "ai.sttOffline": "Модуль распознавания на сервере не установлен",
+  "ai.sttTooLong": "Запись слишком длинная (макс. 2 часа)",
+  "ai.sttEmpty": "В записи не найдено речи",
+  "ai.sttFailed": "Не удалось расшифровать запись",
+  "ai.readyToSend": "Запись готова — нажмите «Анализировать», текст соберёт сервер",
+  "ai.recordings": "Записи переговоров",
+  "ai.noRecordings": "Записей пока нет",
+  "ai.noAudioKept": "Звук не сохранён — только текст",
+  "meetings.title": "Выводы совещаний",
+  "meetings.subtitle": "Чем закончилось каждое совещание — на языке, который вы читаете",
+  "meetings.empty": "Пока ни одно совещание не разобрано",
+  "meetings.noConclusion": "Вывод по этому совещанию не сохранён — есть только расшифровка",
+  "partners.title": "Компании и история переговоров",
+  "partners.subtitle": "С кем что обсуждали и что можно предложить в следующий раз",
+  "partners.empty": "Пока нет записей ни по одной компании",
+  "partners.propose": "Можно предложить",
+  "partners.history": "История переговоров",
+  "partners.lastTalk": "Последний контакт",
+  "partners.kind.muhokama": "обсуждали",
+  "partners.kind.taklif": "мы предложили",
+  "partners.kind.ehtiyoj": "им нужно",
+  "partners.kind.kelishuv": "договорились",
+  "partners.kind.xavf": "риск",
+  "ai.livePicture": "Совещание в реальном времени",
+  "ai.liveDecisions": "Решения",
+  "ai.livePlan": "План",
+  "ai.liveQuestions": "Открытые вопросы",
+  "ai.status.taklif": "предложено",
+  "ai.status.kelishildi": "согласовано",
+  "ai.status.bajarilmoqda": "в работе",
+  "ai.remembered": "Запомнено",
+  "ai.transcriptPlaceholder": "Здесь появится расшифровка. Её можно править.",
+  "ai.transcriptShort": "Текст слишком короткий (минимум 40 символов)",
+  "ai.keyPoints": "Ключевые пункты",
+  "ai.drafts": "Черновиков",
+  "ai.dropped": "Отклонено",
+  "ai.pending": "Ожидают подтверждения",
+  "ai.createTask": "Создать задачу",
+  "ai.edit": "Редактировать",
+  "ai.saveAndCreate": "Сохранить и создать",
+  "ai.cancelEdit": "Отмена",
+  "ai.notAssignable": "У вас нет права давать поручения этому сотруднику",
+  "ai.reviewNote": "Поручения сначала уходят руководителю отдела — он проверит и исправит ошибки",
+  "ai.history": "История",
+
   "common.other": "Прочие",
   "common.all": "Все",
   "common.search": "Поиск",
   "common.save": "Сохранить",
+  "common.add": "Добавить",
+  "common.delete": "Удалить",
   "common.saved": "Сохранено",
   "common.loading": "Загрузка...",
   "common.noData": "Нет данных",

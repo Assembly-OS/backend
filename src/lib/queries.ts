@@ -1,6 +1,6 @@
-import { all, get } from "./db";
+import { all, get, run } from "./db";
 import { isManager } from "./types";
-import type { Role, TaskRow, User } from "./types";
+import type { MessageKind, Role, TaskRow, User } from "./types";
 
 /**
  * The author's note when they sent the work back — `tasks.result_comment` only
@@ -223,6 +223,21 @@ export interface Counters {
   team: number;
 }
 
+/**
+ * Unread across both rails: one-to-one messages still marked unread, plus group
+ * messages past this member's high-water mark. Four placeholders, every one of
+ * them the same user id.
+ */
+const UNREAD_TOTAL = `
+  (SELECT COUNT(*) FROM messages
+     WHERE to_user_id = ? AND group_id IS NULL AND read_at IS NULL)
+  + (SELECT COUNT(*) FROM messages m
+       JOIN group_members gm ON gm.group_id = m.group_id AND gm.user_id = ?
+      WHERE m.from_user_id != ?
+        AND m.id > COALESCE((SELECT r.last_read_id FROM group_reads r
+                              WHERE r.group_id = m.group_id AND r.user_id = ?), 0))
+`;
+
 export function counters(userId: number): Counters {
   const row = get<Counters>(
     `SELECT
@@ -237,8 +252,11 @@ export function counters(userId: number): Counters {
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'BAJARILDI') AS sentDone,
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND deadline IS NOT NULL AND deadline < date('now')
           AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS sentOverdue,
-       (SELECT COUNT(*) FROM messages WHERE to_user_id = ? AND read_at IS NULL) AS unread,
+       ${UNREAD_TOTAL} AS unread,
        (SELECT COUNT(*) FROM users WHERE manager_id = ? AND is_active = 1) AS team`,
+    userId,
+    userId,
+    userId,
     userId,
     userId,
     userId,
@@ -298,11 +316,16 @@ export function pulse(user: User): Pulse {
           JOIN tasks t ON t.id = e.task_id
           WHERE t.to_user_id = ? OR t.from_user_id = ?) AS taskRev,
        (SELECT COALESCE(MAX(id), 0) FROM messages
-          WHERE to_user_id = ? OR from_user_id = ?) AS msgRev,
+          WHERE to_user_id = ? OR from_user_id = ?
+             OR group_id IN (SELECT group_id FROM group_members WHERE user_id = ?)) AS msgRev,
        (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status = 'YANGI') AS incoming,
        (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status IN ('QABUL_QILINDI','BAJARILMOQDA','QAYTARILDI')) AS inWork,
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'TEKSHIRUVDA') AS onReview,
-       (SELECT COUNT(*) FROM messages WHERE to_user_id = ? AND read_at IS NULL) AS unread`,
+       ${UNREAD_TOTAL} AS unread`,
+    userId,
+    userId,
+    userId,
+    userId,
     userId,
     userId,
     userId,
@@ -500,6 +523,9 @@ export interface Conversation {
   department: string | null;
   position: string | null;
   last_body: string;
+  /** Lets the rail label an attachment ("Photo", "Voice message") when the
+   *  caption is empty, instead of showing a blank preview line. */
+  last_kind: MessageKind;
   last_at: string;
   last_from: number;
   unread: number;
@@ -511,11 +537,12 @@ export function conversations(userId: number): Conversation[] {
        SELECT CASE WHEN from_user_id = ? THEN to_user_id ELSE from_user_id END AS pid,
               MAX(id) AS last_id
        FROM messages
-       WHERE from_user_id = ? OR to_user_id = ?
+       WHERE group_id IS NULL AND (from_user_id = ? OR to_user_id = ?)
        GROUP BY pid
      )
      SELECT u.id, u.login, u.full_name, u.role, u.department, u.position,
-            m.body AS last_body, m.created_at AS last_at, m.from_user_id AS last_from,
+            m.body AS last_body, m.kind AS last_kind,
+            m.created_at AS last_at, m.from_user_id AS last_from,
             (SELECT COUNT(*) FROM messages x
               WHERE x.from_user_id = u.id AND x.to_user_id = ? AND x.read_at IS NULL) AS unread
      FROM partners p
@@ -534,9 +561,23 @@ export interface ChatMessage {
   from_user_id: number;
   to_user_id: number;
   body: string;
+  kind: MessageKind;
+  file_name: string | null;
+  file_size: number | null;
+  file_mime: string | null;
+  duration: number | null;
   created_at: string;
   read_at: string | null;
 }
+
+/**
+ * Everything a thread row needs, minus `file_key`: the storage path is a
+ * server-side detail, and these rows are handed straight to a Client Component.
+ * Attachments are addressed by message id through `/api/files/[id]` instead.
+ */
+const MESSAGE_COLUMNS = `id, from_user_id, to_user_id, body, kind,
+                         file_name, file_size, file_mime, duration,
+                         created_at, read_at`;
 
 /** The ids of everyone this user has exchanged messages with. */
 export function conversationPartnerIds(userId: number): number[] {
@@ -544,11 +585,178 @@ export function conversationPartnerIds(userId: number): number[] {
     `SELECT DISTINCT
        CASE WHEN from_user_id = ? THEN to_user_id ELSE from_user_id END AS id
      FROM messages
-     WHERE from_user_id = ? OR to_user_id = ?`,
+     WHERE group_id IS NULL AND (from_user_id = ? OR to_user_id = ?)`,
     userId,
     userId,
     userId,
   ).map((row) => row.id);
+}
+
+/* ------------------------------------------------------------------ */
+/* Group chats                                                        */
+/* ------------------------------------------------------------------ */
+
+export interface GroupSummary {
+  id: number;
+  title: string;
+  created_by: number;
+  members: number;
+  last_body: string;
+  last_kind: MessageKind;
+  last_at: string | null;
+  last_from_name: string | null;
+  unread: number;
+}
+
+/**
+ * The groups this user belongs to, most recently active first. A group with no
+ * messages yet still appears — it was just created and someone has to speak
+ * first — which is why the message join is a LEFT one.
+ */
+export function userGroups(userId: number): GroupSummary[] {
+  return all<GroupSummary>(
+    `SELECT g.id, g.title, g.created_by,
+            (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS members,
+            COALESCE(last.body, '')     AS last_body,
+            COALESCE(last.kind, 'text') AS last_kind,
+            last.created_at             AS last_at,
+            lu.full_name                AS last_from_name,
+            (SELECT COUNT(*) FROM messages x
+              WHERE x.group_id = g.id
+                AND x.from_user_id != ?
+                AND x.id > COALESCE((SELECT r.last_read_id FROM group_reads r
+                                      WHERE r.group_id = g.id AND r.user_id = ?), 0)
+            ) AS unread
+       FROM chat_groups g
+       JOIN group_members me ON me.group_id = g.id AND me.user_id = ?
+       LEFT JOIN messages last
+              ON last.id = (SELECT MAX(id) FROM messages WHERE group_id = g.id)
+       LEFT JOIN users lu ON lu.id = last.from_user_id
+      ORDER BY COALESCE(last.id, 0) DESC, g.id DESC`,
+    userId,
+    userId,
+    userId,
+  );
+}
+
+export interface GroupRow {
+  id: number;
+  title: string;
+  created_by: number;
+  created_at: string;
+}
+
+export function groupById(groupId: number): GroupRow | undefined {
+  return get<GroupRow>("SELECT * FROM chat_groups WHERE id = ?", groupId);
+}
+
+export function isGroupMember(groupId: number, userId: number): boolean {
+  return (
+    get<{ user_id: number }>(
+      "SELECT user_id FROM group_members WHERE group_id = ? AND user_id = ?",
+      groupId,
+      userId,
+    ) !== undefined
+  );
+}
+
+export interface GroupMember {
+  id: number;
+  login: string;
+  full_name: string;
+  role: Role;
+}
+
+export function groupMembers(groupId: number): GroupMember[] {
+  return all<GroupMember>(
+    `SELECT u.id, u.login, u.full_name, u.role
+       FROM group_members m JOIN users u ON u.id = m.user_id
+      WHERE m.group_id = ?
+      ORDER BY u.full_name`,
+    groupId,
+  );
+}
+
+/** A group message carries its author's name: everyone sees several senders. */
+export interface GroupMessage extends Omit<ChatMessage, "to_user_id" | "read_at"> {
+  from_name: string;
+  from_login: string;
+}
+
+export function groupThread(
+  groupId: number,
+  opts: { before?: number; limit?: number } = {},
+): GroupMessage[] {
+  const limit = opts.limit ?? THREAD_PAGE;
+  const params: number[] = [groupId];
+  if (opts.before) params.push(opts.before);
+  params.push(limit);
+
+  return all<GroupMessage>(
+    `SELECT m.id, m.from_user_id, u.full_name AS from_name, u.login AS from_login,
+            m.body, m.kind, m.file_name, m.file_size, m.file_mime, m.duration,
+            m.created_at
+       FROM messages m JOIN users u ON u.id = m.from_user_id
+      WHERE m.group_id = ?
+        ${opts.before ? "AND m.id < ?" : ""}
+      ORDER BY m.id DESC
+      LIMIT ?`,
+    ...params,
+  ).reverse();
+}
+
+/**
+ * Moves this member's high-water mark to the newest message in the group.
+ * Returns true when it actually moved, so the caller only publishes then.
+ */
+export function markGroupRead(groupId: number, userId: number): boolean {
+  const newest = Number(
+    get<{ id: number }>(
+      "SELECT COALESCE(MAX(id), 0) AS id FROM messages WHERE group_id = ?",
+      groupId,
+    )?.id ?? 0,
+  );
+  const current = Number(
+    get<{ last_read_id: number }>(
+      "SELECT last_read_id FROM group_reads WHERE group_id = ? AND user_id = ?",
+      groupId,
+      userId,
+    )?.last_read_id ?? 0,
+  );
+  if (newest <= current) return false;
+
+  run(
+    `INSERT INTO group_reads (group_id, user_id, last_read_id) VALUES (?,?,?)
+     ON CONFLICT(group_id, user_id) DO UPDATE SET last_read_id = excluded.last_read_id`,
+    groupId,
+    userId,
+    newest,
+  );
+  return true;
+}
+
+export interface Attachment {
+  id: number;
+  from_user_id: number;
+  to_user_id: number | null;
+  group_id: number | null;
+  kind: MessageKind;
+  file_name: string | null;
+  file_mime: string | null;
+  file_key: string | null;
+}
+
+/**
+ * The stored blob behind one message, for `/api/files/[id]`. Includes both
+ * participant ids so the route can verify the reader belongs to the thread —
+ * an attachment is exactly as private as the conversation it was sent in.
+ */
+export function attachment(messageId: number): Attachment | undefined {
+  return get<Attachment>(
+    `SELECT id, from_user_id, to_user_id, group_id, kind, file_name, file_mime, file_key
+     FROM messages WHERE id = ?`,
+    messageId,
+  );
 }
 
 /** How many messages one thread page holds. */
@@ -572,7 +780,7 @@ export function thread(
   // Take the newest `limit` (optionally older than `before`), then flip to
   // ascending so the caller renders oldest → newest.
   const rows = all<ChatMessage>(
-    `SELECT * FROM messages
+    `SELECT ${MESSAGE_COLUMNS} FROM messages
      WHERE ((from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?))
        ${opts.before ? "AND id < ?" : ""}
      ORDER BY id DESC

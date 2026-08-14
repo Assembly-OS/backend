@@ -10,7 +10,11 @@ const csp = [
   "form-action 'self'",
   "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org",
   "object-src 'none'",
-  "img-src 'self' data:",
+  // blob: covers the local preview of a photo the user just picked and the
+  // playback of a voice note still in the recorder — neither has a URL on this
+  // origin until the upload lands.
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   // telegram.org hosts the Mini App SDK (telegram-web-app.js) loaded in <head>.
   `script-src 'self' 'unsafe-inline' https://telegram.org${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""}`,
@@ -37,7 +41,19 @@ const nextConfig: NextConfig = {
   // Dev-only; the production build ignores this list.
   allowedDevOrigins: ["*.trycloudflare.com"],
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // User-uploaded bytes get their own, far stricter policy. A config entry
+      // is the only way to set it: headers declared here override whatever a
+      // route handler returns, so the app-wide CSP above would otherwise win
+      // on these responses too.
+      {
+        source: "/api/files/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: "default-src 'none'; sandbox" },
+        ],
+      },
+    ];
   },
 };
 
