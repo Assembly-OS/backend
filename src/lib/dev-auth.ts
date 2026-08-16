@@ -8,13 +8,22 @@ import crypto from "node:crypto";
  */
 export const DEV_COOKIE = "assambleya_dev";
 
-const DEV_KEY = process.env.DEV_PANEL_KEY?.trim() || "assambleya-dev-2026";
+function devKey(): string | null {
+  const configured = process.env.DEV_PANEL_KEY?.trim();
+  if (process.env.NODE_ENV === "production") {
+    if (process.env.DEV_PANEL_ENABLED !== "1") return null;
+    return configured && configured.length >= 32 ? configured : null;
+  }
+  return configured || "assambleya-dev-2026";
+}
 
 /** Constant-time compare so the key can't be guessed by timing. */
 export function keyMatches(candidate: string | undefined | null): boolean {
   if (!candidate) return false;
+  const key = devKey();
+  if (!key) return false;
   const a = Buffer.from(candidate);
-  const b = Buffer.from(DEV_KEY);
+  const b = Buffer.from(key);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 

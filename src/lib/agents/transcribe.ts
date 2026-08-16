@@ -61,7 +61,9 @@ const MAX_SECONDS = Number(process.env.WHISPER_MAX_SECONDS ?? 7200);
 
 export function transcriptionAvailable(): boolean {
   return (
-    fs.existsSync(MODEL) && fs.existsSync(WHISPER) && fs.existsSync(FFMPEG)
+    fs.existsSync(/* turbopackIgnore: true */ MODEL) &&
+    fs.existsSync(/* turbopackIgnore: true */ WHISPER) &&
+    fs.existsSync(/* turbopackIgnore: true */ FFMPEG)
   );
 }
 
@@ -161,7 +163,7 @@ export async function transcribeAudio(
   offsetMs = 0,
 ): Promise<TranscribeResult | TranscribeFailure> {
   if (!transcriptionAvailable()) return "UNAVAILABLE";
-  if (!fs.existsSync(audioPath)) return "BAD_AUDIO";
+  if (!fs.existsSync(/* turbopackIgnore: true */ audioPath)) return "BAD_AUDIO";
 
   const seconds = await durationOf(audioPath);
   if (seconds !== null && seconds > MAX_SECONDS) return "TOO_LONG";
@@ -194,7 +196,8 @@ export async function transcribeAudio(
       // Conversion is I/O bound and fast; a minute is already generous.
       120_000,
     );
-    if (convert.code !== 0 || !fs.existsSync(wav)) return "BAD_AUDIO";
+    if (convert.code !== 0 || !fs.existsSync(/* turbopackIgnore: true */ wav))
+      return "BAD_AUDIO";
 
     const run = await exec(
       WHISPER,
@@ -204,7 +207,7 @@ export async function transcribeAudio(
         "-l", LANGS[lang] ?? "auto",
         // Silence is where the hallucinations come from; never show it to the
         // model. Falls back silently to plain decoding if the model is absent.
-        ...(fs.existsSync(VAD_MODEL)
+        ...(fs.existsSync(/* turbopackIgnore: true */ VAD_MODEL)
           ? ["--vad", "--vad-model", VAD_MODEL, "--vad-threshold", "0.5"]
           : []),
         // Drop the bracketed [MUSIC] / (шум) tokens rather than transcribing
@@ -229,8 +232,8 @@ export async function transcribeAudio(
     if (run.code !== 0) return "FAILED";
 
     const outFile = `${stem}.txt`;
-    const text = fs.existsSync(outFile)
-      ? fs.readFileSync(outFile, "utf8").trim()
+    const text = fs.existsSync(/* turbopackIgnore: true */ outFile)
+      ? fs.readFileSync(/* turbopackIgnore: true */ outFile, "utf8").trim()
       : run.stdout.trim();
 
     // Whisper was trained on subtitle files, so on near-silence it reaches for
@@ -265,7 +268,7 @@ export async function transcribeAudio(
   } finally {
     for (const leftover of [wav, `${stem}.txt`]) {
       try {
-        fs.unlinkSync(leftover);
+        fs.unlinkSync(/* turbopackIgnore: true */ leftover);
       } catch {
         /* never written, or already gone */
       }

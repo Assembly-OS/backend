@@ -463,3 +463,10 @@ CREATE TABLE IF NOT EXISTS assistant_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_assistant_msgs ON assistant_messages(user_id, id);
+
+-- Telegram delivery idempotency. The bot reads and writes rows, but backend is
+-- the only process that owns and migrates this shared schema.
+CREATE TABLE IF NOT EXISTS bot_reports (
+  marker  TEXT PRIMARY KEY,
+  sent_at TEXT
+);

@@ -34,6 +34,7 @@ const securityHeaders = [
 // node:sqlite is a Node built-in — it must NOT be listed in serverExternalPackages,
 // or the bundler tries to require() it from an ESM chunk and fails at runtime.
 const nextConfig: NextConfig = {
+  output: "standalone",
   // In dev, Next blocks cross-site requests to /_next/* and answers
   // "Unauthorized" (see server/lib/router-utils/block-cross-site-dev). The
   // Mini App is served through a cloudflared tunnel, so its host is cross-site

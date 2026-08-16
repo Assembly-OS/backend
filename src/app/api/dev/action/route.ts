@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
-import { spawnSync } from "node:child_process";
 import { db, get, now, run } from "@/lib/db";
-import { hashPassword } from "@/lib/auth";
 import { hasDevAccess } from "@/lib/dev-auth";
 import { clearPresence } from "@/lib/presence";
 import { ROLES, TASK_STATUSES, type Role, type TaskStatus } from "@/lib/types";
-
-const DEMO_PASSWORD = "12345678";
 
 function ok(message: string, extra: Record<string, unknown> = {}) {
   return NextResponse.json({ ok: true, message, ...extra });
@@ -44,12 +40,6 @@ export async function POST(request: Request) {
         if (!ROLES.includes(body.role as Role)) return fail("Неизвестная роль");
         run("UPDATE users SET role = ? WHERE id = ?", body.role!, id);
         return ok(`Роль изменена на ${body.role}`);
-      }
-      case "user.resetPassword": {
-        const u = get<{ login: string }>("SELECT login FROM users WHERE id = ?", id);
-        if (!u) return fail("Пользователь не найден", 404);
-        run("UPDATE users SET password_hash = ? WHERE id = ?", hashPassword(DEMO_PASSWORD), id);
-        return ok(`Пароль @${u.login} сброшен на ${DEMO_PASSWORD}`);
       }
       case "user.delete": {
         try {
@@ -107,17 +97,6 @@ export async function POST(request: Request) {
       case "maint.clearPresence": {
         const n = clearPresence();
         return ok(`Присутствие сброшено (${n} пользователей помечены офлайн)`);
-      }
-      case "maint.reseed": {
-        const res = spawnSync("node", ["scripts/seed.mjs"], {
-          cwd: process.cwd(),
-          encoding: "utf8",
-          timeout: 60_000,
-        });
-        if (res.status !== 0) {
-          return fail(`Сид завершился с ошибкой:\n${res.stderr || res.stdout}`, 500);
-        }
-        return ok("База пересоздана из демо-данных", { output: res.stdout.trim() });
       }
       default:
         return fail("Неизвестное действие");

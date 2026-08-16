@@ -39,7 +39,7 @@ const HASH_SHAPE = /^scrypt\$[0-9a-f]{32}\$[0-9a-f]{128}$/;
 export function isConfigured(): boolean {
   const hash = process.env.ADMIN_PASSWORD_HASH?.trim();
   if (hash) return HASH_SHAPE.test(hash);
-  return Boolean(process.env.ADMIN_PASSWORD);
+  return process.env.NODE_ENV !== "production" && Boolean(process.env.ADMIN_PASSWORD);
 }
 
 /** Constant-time comparison for the plaintext fallback. */
@@ -64,6 +64,7 @@ export function checkCredentials(login: string, password: string): boolean {
   const hash = process.env.ADMIN_PASSWORD_HASH?.trim();
   if (hash && HASH_SHAPE.test(hash)) return verifyPassword(password, hash);
 
+  if (process.env.NODE_ENV === "production") return false;
   const plain = process.env.ADMIN_PASSWORD ?? "";
   return plain.length > 0 && sameString(password, plain);
 }
