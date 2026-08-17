@@ -8,21 +8,41 @@ const DEV_SECRET = "assambleya-ai-os-dev-secret-change-me-in-prod";
  * a production boot without a strong AUTH_SECRET is a hard failure, not a
  * silent fallback. Development still gets a convenient default.
  */
+/**
+ * Resolved on first use, not when the module loads.
+ *
+ * The difference decides whether the image can be built at all. `next build`
+ * loads every route module during "Collecting page data", and it does so with
+ * NODE_ENV=production — but AUTH_SECRET is a runtime secret that is not, and
+ * must not be, present in a build. Computing it at module scope turned this
+ * check into a build failure; computing it on the first signature keeps the
+ * check exactly as strict at the only moment it matters.
+ */
+let cachedSecret: string | undefined;
+
 function resolveSecret(): string {
+  if (cachedSecret) return cachedSecret;
   const fromEnv = process.env.AUTH_SECRET?.trim();
-  if (fromEnv && fromEnv.length >= 16 && fromEnv !== DEV_SECRET) return fromEnv;
+  if (fromEnv && fromEnv.length >= 32 && fromEnv !== DEV_SECRET) {
+    cachedSecret = fromEnv;
+    return cachedSecret;
+  }
 
   if (process.env.NODE_ENV === "production") {
     throw new Error(
       "AUTH_SECRET is required in production and must be a strong, unique value " +
-        "of at least 16 characters. Session tokens are signed with it; running " +
+        "of at least 32 characters. Session tokens are signed with it; running " +
         "without it would let anyone forge a login.",
     );
   }
-  return DEV_SECRET;
+  cachedSecret = DEV_SECRET;
+  return cachedSecret;
 }
 
-const SECRET = resolveSecret();
+/** Runtime readiness check used by the container health endpoint. */
+export function assertAuthSecret(): void {
+  resolveSecret();
+}
 const SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 hours
 
 /* ------------------------------------------------------------------ */
@@ -78,7 +98,7 @@ const b64url = (input: Buffer | string) =>
   Buffer.from(input).toString("base64url");
 
 function sign(data: string): string {
-  return crypto.createHmac("sha256", SECRET).update(data).digest("base64url");
+  return crypto.createHmac("sha256", resolveSecret()).update(data).digest("base64url");
 }
 
 export function createToken(
