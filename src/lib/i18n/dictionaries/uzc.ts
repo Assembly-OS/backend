@@ -15,6 +15,8 @@ const uzc: Dictionary = {
   "login.hint": "Давом этиш учун логин ва паролни киритинг",
   "login.login": "Логин",
   "login.password": "Парол",
+  "login.telegramChecking": "Telegram орқали сизни аниқлаяпмиз…",
+  "login.telegramLink": "Бир марта киринг — кейин Telegram сизни ўзи танийди ва билдиришномалар шу ерга кела бошлайди.",
   "login.submit": "Кириш",
   "login.loading": "Текширилмоқда...",
   "login.error": "Логин ёки парол нотўғри",
@@ -375,7 +377,7 @@ const uzc: Dictionary = {
 
   "assistant.emptyHint": "Жавоб фақат тизимдаги ёзувларга асосланади ва манбаларга ҳавола билан келади",
 
-  "assistant.placeholder": "Масалан: охирги марта қайси компания билан учрашдик?",
+  "assistant.placeholder": "Саволингиз…",
 
   "assistant.send": "Юбориш",
 

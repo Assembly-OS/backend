@@ -15,6 +15,8 @@ const en: Dictionary = {
   "login.hint": "Enter your login and password to continue",
   "login.login": "Login",
   "login.password": "Password",
+  "login.telegramChecking": "Recognising you from Telegram…",
+  "login.telegramLink": "Sign in once — after that Telegram recognises you on its own, and notifications start arriving here.",
   "login.submit": "Sign in",
   "login.loading": "Checking...",
   "login.error": "Invalid login or password",
@@ -375,7 +377,7 @@ const en: Dictionary = {
 
   "assistant.emptyHint": "Answers come only from the records in the system, with links to each source",
 
-  "assistant.placeholder": "For example: who did we meet last?",
+  "assistant.placeholder": "Your question…",
 
   "assistant.send": "Send",
 

@@ -15,6 +15,8 @@ const ru: Dictionary = {
   "login.hint": "Введите логин и пароль для продолжения",
   "login.login": "Логин",
   "login.password": "Пароль",
+  "login.telegramChecking": "Узнаём вас по Telegram…",
+  "login.telegramLink": "Войдите один раз — дальше Telegram будет узнавать вас сам, и уведомления начнут приходить сюда.",
   "login.submit": "Войти",
   "login.loading": "Проверка...",
   "login.error": "Неверный логин или пароль",
@@ -375,7 +377,7 @@ const ru: Dictionary = {
 
   "assistant.emptyHint": "Ответ строится только по записям системы и приходит со ссылками на источники",
 
-  "assistant.placeholder": "Например: с кем мы встречались последний раз?",
+  "assistant.placeholder": "Ваш вопрос…",
 
   "assistant.send": "Отправить",
 

@@ -13,6 +13,8 @@ const uz = {
   "login.hint": "Davom etish uchun login va parolni kiriting",
   "login.login": "Login",
   "login.password": "Parol",
+  "login.telegramChecking": "Telegram orqali sizni aniqlayapmiz…",
+  "login.telegramLink": "Bir marta kiring — keyin Telegram sizni o'zi taniydi va bildirishnomalar shu yerga kela boshlaydi.",
   "login.submit": "Kirish",
   "login.loading": "Tekshirilmoqda...",
   "login.error": "Login yoki parol noto'g'ri",
@@ -373,7 +375,7 @@ const uz = {
 
   "assistant.emptyHint": "Javob faqat tizimdagi yozuvlarga asoslanadi va manbalarga havola bilan keladi",
 
-  "assistant.placeholder": "Masalan: oxirgi marta qaysi kompaniya bilan uchrashdik?",
+  "assistant.placeholder": "Savolingiz…",
 
   "assistant.send": "Yuborish",
 

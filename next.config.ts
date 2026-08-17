@@ -28,13 +28,21 @@ const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  // `microphone=(self)`, not `microphone=()`. An empty allow-list denies the
+  // feature to everyone *including this origin*, and recording a meeting is
+  // something this platform does — the browser was refusing the microphone to
+  // the one page built to use it, before any permission prompt could appear.
+  // Camera and location stay denied outright: nothing here asks for them, and
+  // a policy is the cheapest way to keep it that way.
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(self), geolocation=()",
+  },
 ];
 
 // node:sqlite is a Node built-in — it must NOT be listed in serverExternalPackages,
 // or the bundler tries to require() it from an ESM chunk and fails at runtime.
 const nextConfig: NextConfig = {
-  output: "standalone",
   // In dev, Next blocks cross-site requests to /_next/* and answers
   // "Unauthorized" (see server/lib/router-utils/block-cross-site-dev). The
   // Mini App is served through a cloudflared tunnel, so its host is cross-site

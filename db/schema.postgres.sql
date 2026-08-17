@@ -1,8 +1,24 @@
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-
+-- Схема ASSEMBLY OS для PostgreSQL.
+--
+-- Порт со SQLite. Отличия, которые пришлось решить, и почему именно так:
+--
+--   INTEGER PRIMARY KEY AUTOINCREMENT → GENERATED ALWAYS AS IDENTITY.
+--   Это стандартный SQL и, в отличие от SERIAL, не оставляет за собой
+--   отдельную последовательность, права на которую надо выдавать вручную.
+--
+--   Времена остаются TEXT в формате 'YYYY-MM-DD HH:MM:SS' UTC.
+--   Соблазн перейти на timestamptz велик, но весь код — сравнения, сортировки,
+--   формат в интерфейсе, перевод в ташкентское время — построен вокруг этой
+--   строки. Менять тип и логику одновременно значит не понять, что сломалось.
+--   Перевод типов — отдельная работа после переезда.
+--
+--   datetime('now') → to_char(now() AT TIME ZONE 'UTC', ...) с тем же видом.
+--
+--   COLLATE NOCASE в запросах заменён на ILIKE, а уникальность логина —
+--   на уникальный индекс по lower(login): в Postgres регистронезависимость
+--   задаётся индексом, а не свойством колонки.
 CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   login         TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   full_name     TEXT NOT NULL,
@@ -18,22 +34,22 @@ CREATE TABLE IF NOT EXISTS users (
   is_active     INTEGER NOT NULL DEFAULT 1,
   last_seen     TEXT,
   telegram_id   INTEGER,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS uyushmalar (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name          TEXT NOT NULL,
   short_name    TEXT NOT NULL,
   sector        TEXT NOT NULL,
   region        TEXT NOT NULL,
   members_count INTEGER NOT NULL DEFAULT 0,
   head_user_id  INTEGER,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS loyihalar (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   code       TEXT NOT NULL,
   name       TEXT NOT NULL,
   status     TEXT NOT NULL DEFAULT 'FAOL',
@@ -42,11 +58,11 @@ CREATE TABLE IF NOT EXISTS loyihalar (
   owner_id   INTEGER,
   uyushma_id INTEGER,
   deadline   TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  id             INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   code           TEXT NOT NULL,
   title          TEXT NOT NULL,
   description    TEXT,
@@ -59,33 +75,33 @@ CREATE TABLE IF NOT EXISTS tasks (
   loyiha_id      INTEGER,
   uyushma_id     INTEGER,
   result_comment TEXT,
-  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at     TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   accepted_at    TEXT,
   submitted_at   TEXT,
   closed_at      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_events (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   user_id    INTEGER NOT NULL REFERENCES users(id),
   action     TEXT NOT NULL,
   comment    TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 -- A named conversation with more than two people in it.
 CREATE TABLE IF NOT EXISTS chat_groups (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   title      TEXT NOT NULL,
   created_by INTEGER NOT NULL REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS group_members (
   group_id  INTEGER NOT NULL REFERENCES chat_groups(id) ON DELETE CASCADE,
   user_id   INTEGER NOT NULL REFERENCES users(id),
-  joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+  joined_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   PRIMARY KEY (group_id, user_id)
 );
 
@@ -107,7 +123,7 @@ CREATE TABLE IF NOT EXISTS group_reads (
 -- colleague, the second a group. Keeping both kinds in one table means
 -- attachments, ids and the /api/files route work the same either way.
 CREATE TABLE IF NOT EXISTS messages (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   from_user_id INTEGER NOT NULL REFERENCES users(id),
   to_user_id   INTEGER REFERENCES users(id),
   group_id     INTEGER REFERENCES chat_groups(id) ON DELETE CASCADE,
@@ -121,7 +137,7 @@ CREATE TABLE IF NOT EXISTS messages (
   file_key     TEXT,
   -- Voice length in seconds, as measured by the recorder. NULL otherwise.
   duration     INTEGER,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   read_at      TEXT
 );
 
@@ -142,7 +158,7 @@ CREATE INDEX IF NOT EXISTS idx_events_task ON task_events(task_id, id);
 -- requires at the end of the pattern, written even when the policy check
 -- refuses to let the agent start.
 CREATE TABLE IF NOT EXISTS agent_runs (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   agent       TEXT NOT NULL,
   -- 'manual' | 'schedule' | 'event'
   trigger     TEXT NOT NULL,
@@ -159,13 +175,13 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   tokens_out  INTEGER NOT NULL DEFAULT 0,
   duration_ms INTEGER NOT NULL DEFAULT 0,
   used_model  TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 -- What the agent proposes to do. Nothing here has happened yet: an action
 -- that needs approval waits in 'pending' until a human decides.
 CREATE TABLE IF NOT EXISTS agent_proposals (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   run_id      INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
   agent       TEXT NOT NULL,
   -- The action verb, always one the agent's action scope allows.
@@ -188,7 +204,7 @@ CREATE TABLE IF NOT EXISTS agent_proposals (
   -- assignee's department. The submitter is the fallback when the department
   -- has no head — a proposal nobody owns is a proposal nobody acts on.
   reviewer_user_id INTEGER REFERENCES users(id),
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_at   ON agent_runs(id DESC);
@@ -198,7 +214,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_prop_stat ON agent_proposals(status, id DES
 -- panel has no owner; one started by a department head does, and that person
 -- is the one allowed to approve its proposals.
 CREATE TABLE IF NOT EXISTS meetings (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   title        TEXT NOT NULL,
   owner_id     INTEGER NOT NULL REFERENCES users(id),
   -- Storage key of the recording, when one was kept. Transcript is the
@@ -208,7 +224,7 @@ CREATE TABLE IF NOT EXISTS meetings (
   transcript   TEXT NOT NULL,
   -- Recognition language: 'uz-UZ' | 'ru-RU' | 'en-US'.
   lang         TEXT NOT NULL DEFAULT 'uz-UZ',
-  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_meetings_owner ON meetings(owner_id, id DESC);
@@ -219,7 +235,7 @@ CREATE INDEX IF NOT EXISTS idx_meetings_owner ON meetings(owner_id, id DESC);
 -- Separate from `meetings` on purpose: this row exists before anyone knows
 -- whether the recording will be worth keeping, and is deleted when it is not.
 CREATE TABLE IF NOT EXISTS meeting_live (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   owner_id     INTEGER NOT NULL REFERENCES users(id),
   title        TEXT NOT NULL,
   lang         TEXT NOT NULL DEFAULT 'uz-UZ',
@@ -235,8 +251,8 @@ CREATE TABLE IF NOT EXISTS meeting_live (
   rounds       INTEGER NOT NULL DEFAULT 0,
   tokens_in    INTEGER NOT NULL DEFAULT 0,
   tokens_out   INTEGER NOT NULL DEFAULT 0,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_live_owner ON meeting_live(owner_id, id DESC);
@@ -248,14 +264,14 @@ CREATE INDEX IF NOT EXISTS idx_live_owner ON meeting_live(owner_id, id DESC);
 -- a risk that was raised. Fed back into later analyses so the agent knows what
 -- was already agreed instead of re-deriving it from scratch every time.
 CREATE TABLE IF NOT EXISTS meeting_memory (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   meeting_id   INTEGER REFERENCES meetings(id),
   -- Who or what the fact is about, as written in the meeting.
   subject      TEXT NOT NULL,
   fact         TEXT NOT NULL,
   -- 'qaror' | 'majburiyat' | 'xavf' | 'kontekst'
   kind         TEXT NOT NULL DEFAULT 'kontekst',
-  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_memory_recent ON meeting_memory(id DESC);
@@ -274,7 +290,7 @@ CREATE TABLE IF NOT EXISTS meeting_conclusions (
   -- JSON arrays of strings, in the same order across languages.
   key_points  TEXT NOT NULL DEFAULT '[]',
   decisions   TEXT NOT NULL DEFAULT '[]',
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   PRIMARY KEY (meeting_id, lang)
 );
 
@@ -289,17 +305,17 @@ CREATE INDEX IF NOT EXISTS idx_conclusions_at ON meeting_conclusions(meeting_id 
 -- are where he looks: one row per company, its history underneath, and the
 -- things worth proposing to it next.
 CREATE TABLE IF NOT EXISTS partners (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   -- Matched case-insensitively so "Uzum" and "UZUM" are one company.
-  name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  name        TEXT NOT NULL UNIQUE,
   sector      TEXT,
-  first_seen  TEXT NOT NULL DEFAULT (datetime('now')),
-  last_seen   TEXT NOT NULL DEFAULT (datetime('now'))
+  first_seen  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  last_seen   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 -- What was said about a company in one meeting, in all three languages.
 CREATE TABLE IF NOT EXISTS partner_notes (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   partner_id  INTEGER NOT NULL REFERENCES partners(id),
   meeting_id  INTEGER REFERENCES meetings(id),
   -- 'muhokama' discussed | 'taklif' we offered | 'ehtiyoj' they need
@@ -308,13 +324,13 @@ CREATE TABLE IF NOT EXISTS partner_notes (
   uz          TEXT NOT NULL,
   ru          TEXT NOT NULL,
   en          TEXT NOT NULL,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 -- What to propose next, and why. The answer to "what can I offer them?" —
 -- including a match across two companies that never met each other.
 CREATE TABLE IF NOT EXISTS partner_ideas (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   partner_id   INTEGER REFERENCES partners(id),
   meeting_id   INTEGER REFERENCES meetings(id),
   -- The other company, when the idea is to introduce two of them.
@@ -327,7 +343,7 @@ CREATE TABLE IF NOT EXISTS partner_ideas (
   why_en       TEXT NOT NULL DEFAULT '',
   -- 'yangi' new | 'bajarildi' acted on | 'kerak emas' dismissed
   status       TEXT NOT NULL DEFAULT 'yangi',
-  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_partner_notes ON partner_notes(partner_id, id DESC);
@@ -340,10 +356,10 @@ CREATE INDEX IF NOT EXISTS idx_partner_ideas ON partner_ideas(status, id DESC);
 -- Companies. The table is still called `partners` because the AI intake has
 -- been writing to it since before the CRM existed; renaming it would break
 -- that path for no gain. Everything below is the full company card.
-CREATE TABLE IF NOT EXISTS company_fields_marker (id INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS company_fields_marker (id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY);
 
 CREATE TABLE IF NOT EXISTS contacts (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   company_id    INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
   first_name    TEXT NOT NULL,
   last_name     TEXT NOT NULL DEFAULT '',
@@ -355,8 +371,8 @@ CREATE TABLE IF NOT EXISTS contacts (
   -- because SQLite cannot express "at most one true per group".
   is_head       INTEGER NOT NULL DEFAULT 0,
   note          TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_id, is_head DESC);
@@ -368,7 +384,7 @@ CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_id, is_head 
 -- Assembly and a company undertook together, and it survives whether or not
 -- anyone turned it into a task. The two are linked, not merged.
 CREATE TABLE IF NOT EXISTS agreements (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   company_id    INTEGER REFERENCES partners(id) ON DELETE CASCADE,
   meeting_id    INTEGER REFERENCES meetings(id) ON DELETE SET NULL,
   -- The task raised to carry it out, when one was.
@@ -389,7 +405,7 @@ CREATE TABLE IF NOT EXISTS agreements (
   -- Written by the AI analysis rather than typed by a person.
   source        TEXT NOT NULL DEFAULT 'manual',
   created_by    INTEGER REFERENCES users(id),
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   done_at       TEXT
 );
 
@@ -398,7 +414,7 @@ CREATE INDEX IF NOT EXISTS idx_agree_deadline ON agreements(status, deadline);
 CREATE INDEX IF NOT EXISTS idx_agree_owner    ON agreements(owner_user_id, status);
 
 CREATE TABLE IF NOT EXISTS reminders (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   agreement_id  INTEGER REFERENCES agreements(id) ON DELETE CASCADE,
   user_id       INTEGER NOT NULL REFERENCES users(id),
   -- 'YYYY-MM-DD HH:MM:SS' UTC, like every other instant in this database.
@@ -408,7 +424,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   -- PENDING | SENT | DISMISSED
   status        TEXT NOT NULL DEFAULT 'PENDING',
   message       TEXT NOT NULL DEFAULT '',
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   sent_at       TEXT
 );
 
@@ -422,7 +438,7 @@ CREATE INDEX IF NOT EXISTS idx_remind_user ON reminders(user_id, status, remind_
 -- than derived because the one thing a notification must remember is whether it
 -- has been read, and that cannot be computed from the underlying record.
 CREATE TABLE IF NOT EXISTS notifications (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   -- 'task' | 'reminder' | 'agreement' | 'review' | 'meeting'
   kind        TEXT NOT NULL,
@@ -433,7 +449,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   entity      TEXT,
   entity_id   INTEGER,
   read_at     TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read_at, id DESC);
@@ -451,7 +467,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_once
 -- Here it is scoped to the account, follows them to their phone, and goes
 -- when the account goes.
 CREATE TABLE IF NOT EXISTS assistant_messages (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   -- 'user' | 'assistant'
   role        TEXT NOT NULL,
@@ -459,7 +475,50 @@ CREATE TABLE IF NOT EXISTS assistant_messages (
   -- The source links shown under an answer, as JSON. Stored rather than
   -- recomputed: they are what the model actually cited at the time.
   refs        TEXT NOT NULL DEFAULT '[]',
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_assistant_msgs ON assistant_messages(user_id, id);
+
+
+-- Логин уникален без учёта регистра: в SQLite это делал COLLATE NOCASE
+-- на колонке, здесь — индекс. Без него «Rais» и «rais» стали бы двумя людьми.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_ci ON users (lower(login));
+
+-- Колонки, добавленные миграциями поверх исходной схемы.
+-- Собраны сравнением с рабочей базой, а не по истории правок:
+-- база — источник истины о том, что в ней на самом деле есть.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS site_no INTEGER;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS owner_user_id INTEGER;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS source_kind TEXT;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS source_ref TEXT;
+ALTER TABLE agent_proposals ADD COLUMN IF NOT EXISTS owner_user_id INTEGER;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS company_id INTEGER;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS held_at TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS place TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS participants TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS responsible_id INTEGER;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS next_steps TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS updated_at TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS industry TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS direction TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS services TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS country TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS city TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS website TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS head_name TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS head_position TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'POTENTIAL';
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS started_at TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS last_contact_at TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS next_contact_at TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS owner_user_id INTEGER;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS created_at TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS updated_at TEXT;
