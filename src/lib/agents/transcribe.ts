@@ -61,7 +61,9 @@ const MAX_SECONDS = Number(process.env.WHISPER_MAX_SECONDS ?? 7200);
 
 export function transcriptionAvailable(): boolean {
   return (
-    fs.existsSync(MODEL) && fs.existsSync(WHISPER) && fs.existsSync(FFMPEG)
+    fs.existsSync(/* turbopackIgnore: true */ MODEL) &&
+    fs.existsSync(/* turbopackIgnore: true */ WHISPER) &&
+    fs.existsSync(/* turbopackIgnore: true */ FFMPEG)
   );
 }
 
@@ -204,7 +206,7 @@ export async function transcribeAudio(
         "-l", LANGS[lang] ?? "auto",
         // Silence is where the hallucinations come from; never show it to the
         // model. Falls back silently to plain decoding if the model is absent.
-        ...(fs.existsSync(VAD_MODEL)
+        ...(fs.existsSync(/* turbopackIgnore: true */ VAD_MODEL)
           ? ["--vad", "--vad-model", VAD_MODEL, "--vad-threshold", "0.5"]
           : []),
         // Drop the bracketed [MUSIC] / (шум) tokens rather than transcribing

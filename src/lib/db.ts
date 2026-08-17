@@ -2,14 +2,21 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import fs from "node:fs";
 
-const DB_DIR = path.join(process.cwd(), "data");
+// Каталог данных задаётся снаружи: в образе это /data — постоянный том,
+// смонтированный рядом с /data/uploads. Без переменной база уходит в
+// /app/data, то есть в эфемерный слой контейнера: файлы вложений
+// переживают перезапуск, а строки в базе — нет. Расхождение состояния
+// хуже честного падения.
+const DB_DIR =
+  process.env.ASSAMBLEYA_DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DB_DIR, "assambleya.db");
 const SCHEMA_PATH = path.join(process.cwd(), "db", "schema.sql");
 
 type Global = typeof globalThis & { __assambleyaDb?: DatabaseSync };
 
 function open(): DatabaseSync {
-  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+  if (!fs.existsSync(/* turbopackIgnore: true */ DB_DIR))
+    fs.mkdirSync(/* turbopackIgnore: true */ DB_DIR, { recursive: true });
   const database = new DatabaseSync(DB_PATH);
 
   // node:sqlite does not enable these by default. Set them before any query:
@@ -24,7 +31,9 @@ function open(): DatabaseSync {
     PRAGMA synchronous = NORMAL;
   `);
 
-  database.exec(fs.readFileSync(SCHEMA_PATH, "utf8"));
+  database.exec(
+    fs.readFileSync(/* turbopackIgnore: true */ SCHEMA_PATH, "utf8"),
+  );
 
   // `CREATE TABLE IF NOT EXISTS` never alters an existing table, so a database
   // seeded before `last_seen` existed needs the column added once. Adding it

@@ -138,10 +138,10 @@ export function store(
   const year = String(stamp.getUTCFullYear());
   const month = String(stamp.getUTCMonth() + 1).padStart(2, "0");
 
-  fs.mkdirSync(`${UPLOAD_ROOT}/${year}/${month}`, { recursive: true });
+  fs.mkdirSync(/* turbopackIgnore: true */ `${UPLOAD_ROOT}/${year}/${month}`, { recursive: true });
 
   const key = `${year}/${month}/${randomBytes(16).toString("hex")}.${extensionFor(kind, mime, name)}`;
-  fs.writeFileSync(`${UPLOAD_ROOT}/${key}`, bytes);
+  fs.writeFileSync(/* turbopackIgnore: true */ `${UPLOAD_ROOT}/${key}`, bytes);
   return { key, size: bytes.byteLength };
 }
 
@@ -152,12 +152,12 @@ export function store(
 export function resolvePath(key: string): string | null {
   if (!KEY_PATTERN.test(key)) return null;
   const full = `${UPLOAD_ROOT}/${key}`;
-  return fs.existsSync(full) ? full : null;
+  return fs.existsSync(/* turbopackIgnore: true */ full) ? full : null;
 }
 
 export function read(key: string): Buffer | null {
   const full = resolvePath(key);
-  return full ? fs.readFileSync(full) : null;
+  return full ? fs.readFileSync(/* turbopackIgnore: true */ full) : null;
 }
 
 /** Best-effort delete — a missing file is already in the desired state. */
@@ -165,7 +165,7 @@ export function remove(key: string): void {
   const full = resolvePath(key);
   if (full) {
     try {
-      fs.unlinkSync(full);
+      fs.unlinkSync(/* turbopackIgnore: true */ full);
     } catch {
       /* already gone */
     }
