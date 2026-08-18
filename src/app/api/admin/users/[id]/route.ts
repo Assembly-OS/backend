@@ -112,3 +112,48 @@ export async function PATCH(
 
   return NextResponse.json({ error: "BAD_ACTION" }, { status: 400 });
 }
+
+/**
+ * Removes a staff account outright.
+ *
+ * Deactivating is still the right answer for someone who has worked here:
+ * assignments, chat messages and meeting records name them, and the schema
+ * enforces that with foreign keys. This exists for the other case — an account
+ * created by mistake, or a duplicate — where there is nothing to preserve and
+ * leaving a deactivated row is just clutter.
+ *
+ * The distinction is not guessed at. The delete is attempted and the database
+ * decides: a person with any history trips a foreign key and the answer comes
+ * back as "deactivate instead", which is accurate by construction rather than
+ * by a list of tables somebody has to remember to update.
+ */
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  if (!(await hasAdminSession()))
+    return NextResponse.json({ error: "AUTH" }, { status: 401 });
+
+  const targetId = parseId((await params).id);
+  if (!targetId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
+
+  const target = get<Target>(
+    "SELECT id, role, is_active FROM users WHERE id = ?",
+    targetId,
+  );
+  if (!target) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+
+  // The Assembly needs a chairman, and deleting is even less reversible than
+  // deactivating — the same guard applies, harder.
+  if (target.role === "RAIS" && activeRaisCount() <= 1)
+    return NextResponse.json({ error: "LAST_RAIS" }, { status: 400 });
+
+  try {
+    run("DELETE FROM users WHERE id = ?", targetId);
+  } catch {
+    return NextResponse.json({ error: "HAS_HISTORY" }, { status: 409 });
+  }
+
+  publish(targetId);
+  return NextResponse.json({ ok: true });
+}
