@@ -88,6 +88,10 @@ export function retryImport(): Promise<ImportReport> {
 async function run(): Promise<ImportReport> {
   const file = legacyPath();
   const moved: Record<string, number> = {};
+  // Junction tables key on a pair of columns and have no `id` at all, so they
+  // have no sequence to advance either. Asking for MAX(id) on one is an error
+  // that rolls the whole import back.
+  const sequenced = new Set<string>();
   if (!fs.existsSync(file)) {
     return { status: "no-file", file, moved, total: 0 };
   }
@@ -166,11 +170,12 @@ async function run(): Promise<ImportReport> {
           );
         }
         moved[table] = rows.length;
+        if (columns.includes("id")) sequenced.add(table);
       }
 
       // Identity counters still sit at 1: they were never consulted, because
       // every id was supplied. The next insert would collide with row 1.
-      for (const table of Object.keys(moved)) {
+      for (const table of sequenced) {
         await client.query(
           `SELECT setval(pg_get_serial_sequence('${table}', 'id'),
                          GREATEST((SELECT COALESCE(MAX(id), 0) FROM ${table}), 1))`,
