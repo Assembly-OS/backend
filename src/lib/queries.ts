@@ -320,9 +320,9 @@ export async function counters(userId: number): Promise<Counters> {
   const row = await get<Counters>(
     `SELECT
        (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status = 'YANGI') AS incoming,
-       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status IN ('QABUL_QILINDI','BAJARILMOQDA','QAYTARILDI')) AS inWork,
+       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status IN ('QABUL_QILINDI','BAJARILMOQDA','QAYTARILDI')) AS "inWork",
        (SELECT COUNT(*) FROM tasks WHERE COALESCE(reviewer_user_id, from_user_id) = ?
-          AND status = 'TEKSHIRUVDA') AS onReview,
+          AND status = 'TEKSHIRUVDA') AS "onReview",
        -- Counted over stages, not tasks: the moment a chain moves on, its
        -- first participant stops being \`to_user_id\` and the work they
        -- actually finished would vanish from their own tally.
@@ -330,10 +330,10 @@ export async function counters(userId: number): Promise<Counters> {
        (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND deadline IS NOT NULL AND deadline < ?
           AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ?) AS sent,
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS sentActive,
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'BAJARILDI') AS sentDone,
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS "sentActive",
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'BAJARILDI') AS "sentDone",
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND deadline IS NOT NULL AND deadline < ?
-          AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS sentOverdue,
+          AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS "sentOverdue",
        ${UNREAD_TOTAL} AS unread,
        (SELECT COUNT(*) FROM users WHERE manager_id = ? AND is_active = 1) AS team`,
     userId,
@@ -398,13 +398,13 @@ export async function pulse(user: User): Promise<Pulse> {
     `SELECT
        (SELECT COALESCE(MAX(e.id), 0) FROM task_events e
           JOIN tasks t ON t.id = e.task_id
-          WHERE t.to_user_id = ? OR t.from_user_id = ?) AS taskRev,
+          WHERE t.to_user_id = ? OR t.from_user_id = ?) AS "taskRev",
        (SELECT COALESCE(MAX(id), 0) FROM messages
           WHERE to_user_id = ? OR from_user_id = ?
-             OR group_id IN (SELECT group_id FROM group_members WHERE user_id = ?)) AS msgRev,
+             OR group_id IN (SELECT group_id FROM group_members WHERE user_id = ?)) AS "msgRev",
        (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status = 'YANGI') AS incoming,
-       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status IN ('QABUL_QILINDI','BAJARILMOQDA','QAYTARILDI')) AS inWork,
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'TEKSHIRUVDA') AS onReview,
+       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status IN ('QABUL_QILINDI','BAJARILMOQDA','QAYTARILDI')) AS "inWork",
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'TEKSHIRUVDA') AS "onReview",
        ${UNREAD_TOTAL} AS unread`,
     userId,
     userId,

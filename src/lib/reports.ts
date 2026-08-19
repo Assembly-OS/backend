@@ -150,7 +150,7 @@ export async function weeklyReport(offset = 0): Promise<WeeklyReport> {
             AND e.created_at >= ? AND e.created_at < ?) AS returned,
        (SELECT COUNT(*) FROM task_events e
           WHERE e.user_id = u.id AND e.action = 'TASDIQLANDI'
-            AND e.created_at >= ? AND e.created_at < ?) AS approvedForOthers,
+            AND e.created_at >= ? AND e.created_at < ?) AS "approvedForOthers",
        (SELECT COUNT(*) FROM tasks t
           WHERE t.to_user_id = u.id AND t.deadline IS NOT NULL
             AND t.deadline < ?
