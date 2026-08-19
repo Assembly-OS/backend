@@ -57,17 +57,40 @@ function legacyPath(): string {
   return path.join(dir, "assambleya.db");
 }
 
-let done: Promise<void> | null = null;
+export interface ImportReport {
+  status: "imported" | "no-file" | "already-populated" | "failed";
+  file: string;
+  moved: Record<string, number>;
+  total: number;
+  error?: string;
+}
 
-/** Imports once per process; later calls await the first one's outcome. */
-export function importLegacy(): Promise<void> {
+let done: Promise<ImportReport> | null = null;
+
+/**
+ * Imports once per process; later calls await the first one's outcome.
+ *
+ * The report is kept rather than discarded because there is no shell on the
+ * server to ask afterwards. `/api/admin/import-legacy` reads it back, which is
+ * the difference between "the platform came up empty" and knowing why.
+ */
+export function importLegacy(): Promise<ImportReport> {
   if (!done) done = run();
   return done;
 }
 
-async function run(): Promise<void> {
+/** Forgets the cached outcome so a fixed cause can be retried without a redeploy. */
+export function retryImport(): Promise<ImportReport> {
+  done = null;
+  return importLegacy();
+}
+
+async function run(): Promise<ImportReport> {
   const file = legacyPath();
-  if (!fs.existsSync(file)) return;
+  const moved: Record<string, number> = {};
+  if (!fs.existsSync(file)) {
+    return { status: "no-file", file, moved, total: 0 };
+  }
 
   const client = await pool().connect();
   try {
@@ -76,10 +99,16 @@ async function run(): Promise<void> {
     const occupied = await client.query<{ n: string }>(
       "SELECT COUNT(*) AS n FROM users",
     );
-    if (Number(occupied.rows[0]?.n ?? 0) > 0) return;
+    if (Number(occupied.rows[0]?.n ?? 0) > 0) {
+      return { status: "already-populated", file, moved, total: 0 };
+    }
 
-    const source = new DatabaseSync(file, { readOnly: true });
-    const moved: [string, number][] = [];
+    // Opened writable on purpose. The old server ran in WAL mode, and a
+    // read-only handle cannot replay a write-ahead log it is not allowed to
+    // checkpoint — it either refuses to open or silently reads the database as
+    // it stood before the last writes. Those last writes are exactly the rows
+    // worth carrying across.
+    const source = new DatabaseSync(file);
 
     try {
       // One transaction: a half-imported database is worse than an empty one,
@@ -136,12 +165,12 @@ async function run(): Promise<void> {
             columns.map((column) => row[column] ?? null),
           );
         }
-        moved.push([table, rows.length]);
+        moved[table] = rows.length;
       }
 
       // Identity counters still sit at 1: they were never consulted, because
       // every id was supplied. The next insert would collide with row 1.
-      for (const [table] of moved) {
+      for (const table of Object.keys(moved)) {
         await client.query(
           `SELECT setval(pg_get_serial_sequence('${table}', 'id'),
                          GREATEST((SELECT COALESCE(MAX(id), 0) FROM ${table}), 1))`,
@@ -154,20 +183,19 @@ async function run(): Promise<void> {
       // Loud, and then out of the way: the platform starts on an empty
       // database rather than refusing to boot, and the old file is untouched
       // and still importable once the cause is fixed.
-      console.error(
-        "[import] SQLite import rolled back, nothing was written:",
-        error instanceof Error ? error.message : error,
-      );
-      return;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[import] rolled back, nothing was written:", message);
+      return { status: "failed", file, moved: {}, total: 0, error: message };
     } finally {
       source.close();
     }
 
-    const total = moved.reduce((sum, [, n]) => sum + n, 0);
+    const total = Object.values(moved).reduce((sum, n) => sum + n, 0);
     console.log(
       `[import] moved ${total} rows from ${file}: ` +
-        moved.map(([table, n]) => `${table}=${n}`).join(" "),
+        Object.entries(moved).map(([table, n]) => `${table}=${n}`).join(" "),
     );
+    return { status: "imported", file, moved, total };
   } finally {
     client.release();
   }
