@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { run } from "@/lib/db";
+import { get } from "@/lib/pg";
 import { hasAdminSession } from "@/lib/admin-auth";
 import { messageFileKey } from "@/lib/admin";
 import { publish } from "@/lib/events";
@@ -23,9 +23,14 @@ export async function DELETE(
   if (!messageId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
   // Read the key before the row disappears, or the file is orphaned on disk.
-  const key = messageFileKey(messageId);
-  const result = run("DELETE FROM messages WHERE id = ?", messageId);
-  if (Number(result.changes) === 0)
+  const key = await messageFileKey(messageId);
+  // RETURNING stands in for the changed-row count SQLite handed back: the 404
+  // turns on whether a row was there, and run() no longer reports that.
+  const deleted = await get<{ id: number }>(
+    "DELETE FROM messages WHERE id = ? RETURNING id",
+    messageId,
+  );
+  if (!deleted)
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   if (key) remove(key);

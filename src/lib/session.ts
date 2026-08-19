@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { readToken, SESSION_COOKIE } from "./auth";
-import { get } from "./db";
+import { get } from "./pg";
 import type { Locale, User } from "./types";
 import { LOCALES } from "./i18n/config";
 
@@ -12,7 +12,7 @@ export async function currentUser(): Promise<User | null> {
   const jar = await cookies();
   const payload = readToken(jar.get(SESSION_COOKIE)?.value);
   if (!payload) return null;
-  const user = get<User>(
+  const user = await get<User>(
     "SELECT * FROM users WHERE id = ? AND is_active = 1",
     payload.uid,
   );

@@ -16,7 +16,7 @@ export async function POST(
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
-  const other = userByLogin(decodeURIComponent(login));
+  const other = await userByLogin(decodeURIComponent(login));
   if (!other || other.id === user.id) {
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
   }

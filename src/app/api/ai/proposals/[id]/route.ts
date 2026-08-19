@@ -35,7 +35,7 @@ export async function POST(
   if (!proposalId)
     return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const proposal = proposalById(proposalId);
+  const proposal = await proposalById(proposalId);
   if (!proposal)
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
@@ -80,14 +80,14 @@ export async function POST(
       // Re-checked against *this reviewer's* assignment graph. The draft's
       // original owner passed the same check when it was filed; a reviewer
       // retargeting it must clear it on their own authority.
-      if (!assignableUsers(user).some((person) => person.id === target)) {
+      if (!(await assignableUsers(user)).some((person) => person.id === target)) {
         return NextResponse.json({ error: "NOT_ASSIGNABLE" }, { status: 400 });
       }
       edits.toUserId = target;
     }
   }
 
-  const outcome = decideProposal(proposalId, decision, user.login, edits);
+  const outcome = await decideProposal(proposalId, decision, user.login, edits);
   if (!outcome.ok)
     return NextResponse.json({ error: outcome.error }, { status: 400 });
 

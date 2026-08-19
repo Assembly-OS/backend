@@ -40,9 +40,9 @@ export async function POST(request: Request) {
   // The conversation so far comes from the record, not from the browser: two
   // open tabs would otherwise hand the model two different pasts, and a
   // client can claim anything was said.
-  const history: AssistantTurn[] = chatHistory(user.id, CONTEXT_TURNS).map(
-    (turn) => ({ role: turn.role, content: turn.content }),
-  );
+  const history: AssistantTurn[] = (
+    await chatHistory(user.id, CONTEXT_TURNS)
+  ).map((turn) => ({ role: turn.role, content: turn.content }));
 
   const locale = await currentLocale(user);
   const outcome = await askAssistant(user, locale, history, question);
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   // Deduped upstream; capped here so a broad question does not return a wall
   // of links under a three-line answer.
   const shown = refs.slice(0, 12);
-  appendExchange(user.id, question, answer, shown);
+  await appendExchange(user.id, question, answer, shown);
 
   return NextResponse.json({ answer, refs: shown, steps });
 }
@@ -71,6 +71,6 @@ export async function POST(request: Request) {
 export async function DELETE() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
-  clearChat(user.id);
+  await clearChat(user.id);
   return NextResponse.json({ ok: true });
 }

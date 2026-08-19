@@ -1,4 +1,4 @@
-import { all, get, now, run } from "@/lib/db";
+import { all, get, insert, now, run } from "@/lib/pg";
 import { notifyBot } from "@/lib/notify-bot";
 import { analyze, type Finding } from "./analyzers";
 import { createTaskFromProposal } from "./intake-runner";
@@ -68,7 +68,7 @@ export function policyCheck(agent: AgentSpec): PolicyVerdict {
 }
 
 /** Records the run row that every path — including a refusal — ends with. */
-function writeRun(fields: {
+async function writeRun(fields: {
   agent: string;
   trigger: Trigger;
   actor: string;
@@ -80,8 +80,11 @@ function writeRun(fields: {
   tokensOut?: number;
   durationMs?: number;
   usedModel?: string;
-}): number {
-  run(
+}): Promise<number> {
+  // RETURNING rather than a follow-up SELECT MAX(id): the bot and the web app
+  // write to the same database now, so the largest id is not necessarily the
+  // row this call just wrote.
+  return await insert(
     `INSERT INTO agent_runs
        (agent, trigger, actor, status, detail, context_rows, proposals,
         tokens_in, tokens_out, duration_ms, used_model, created_at)
@@ -99,9 +102,6 @@ function writeRun(fields: {
     fields.usedModel ?? null,
     now(),
   );
-  return Number(
-    get<{ id: number }>("SELECT MAX(id) AS id FROM agent_runs")!.id,
-  );
 }
 
 /**
@@ -117,7 +117,7 @@ export async function runAgent(
   const agent = agentById(agentId);
 
   if (!agent) {
-    const runId = writeRun({
+    const runId = await writeRun({
       agent: agentId,
       trigger,
       actor,
@@ -129,7 +129,7 @@ export async function runAgent(
 
   const verdict = policyCheck(agent);
   if (!verdict.allowed) {
-    const runId = writeRun({
+    const runId = await writeRun({
       agent: agent.id,
       trigger,
       actor,
@@ -148,7 +148,7 @@ export async function runAgent(
   }
 
   // CONTEXT RETRIEVAL — exactly the declared scopes, nothing wider.
-  const context = loadContext(agent.dataScope);
+  const context = await loadContext(agent.dataScope);
 
   // ANALYSIS — deterministic, over that context only.
   const findings = analyze(agent.id, context);
@@ -165,7 +165,7 @@ export async function runAgent(
 
   const summary = await summarize(agent, allowed, agent.tokenBudget);
 
-  const runId = writeRun({
+  const runId = await writeRun({
     agent: agent.id,
     trigger,
     actor,
@@ -189,7 +189,7 @@ export async function runAgent(
 
   for (const finding of allowed) {
     const gated = needsApproval(agent, finding.action);
-    run(
+    await run(
       `INSERT INTO agent_proposals
          (run_id, agent, action, title, body, severity, subject_kind, subject_id,
           payload, status, created_at)
@@ -211,7 +211,7 @@ export async function runAgent(
   }
 
   if (summary) {
-    run(
+    await run(
       `INSERT INTO agent_proposals
          (run_id, agent, action, title, body, severity, status, created_at)
        VALUES (?,?,?,?,?,?,?,?)`,
@@ -280,13 +280,13 @@ export interface ProposalEdits {
  * intent reach the outside world, and it runs after a named human said yes —
  * TZ §16 AI-03: nothing leaves the system without approval.
  */
-export function decideProposal(
+export async function decideProposal(
   proposalId: number,
   decision: "approve" | "reject",
   decidedBy: string,
   edits?: ProposalEdits,
-): { ok: boolean; error?: string; result?: string } {
-  const proposal = get<ProposalRow>(
+): Promise<{ ok: boolean; error?: string; result?: string }> {
+  const proposal = await get<ProposalRow>(
     "SELECT * FROM agent_proposals WHERE id = ?",
     proposalId,
   );
@@ -294,7 +294,7 @@ export function decideProposal(
   if (proposal.status !== "pending") return { ok: false, error: "NOT_PENDING" };
 
   if (decision === "reject") {
-    run(
+    await run(
       "UPDATE agent_proposals SET status = 'rejected', decided_by = ?, decided_at = ? WHERE id = ?",
       decidedBy,
       now(),
@@ -307,7 +307,7 @@ export function decideProposal(
   // the proposal was queued, and a stale approval must not widen it.
   const agent = agentById(proposal.agent);
   if (!agent || !agent.actionScope.includes(proposal.action)) {
-    run(
+    await run(
       "UPDATE agent_proposals SET status = 'failed', decided_by = ?, decided_at = ?, result = ? WHERE id = ?",
       decidedBy,
       now(),
@@ -339,7 +339,7 @@ export function decideProposal(
             ? String(payload.deadline)
             : null;
 
-      const code = createTaskFromProposal(proposal.owner_user_id, {
+      const code = await createTaskFromProposal(proposal.owner_user_id, {
         toUserId,
         title: String(title).slice(0, 200),
         description: String(
@@ -366,7 +366,7 @@ export function decideProposal(
       }
     }
   } catch (error) {
-    run(
+    await run(
       "UPDATE agent_proposals SET status = 'failed', decided_by = ?, decided_at = ?, result = ? WHERE id = ?",
       decidedBy,
       now(),
@@ -376,7 +376,7 @@ export function decideProposal(
     return { ok: false, error: "EXECUTION_FAILED" };
   }
 
-  run(
+  await run(
     "UPDATE agent_proposals SET status = 'executed', decided_by = ?, decided_at = ?, result = ? WHERE id = ?",
     decidedBy,
     now(),
@@ -406,8 +406,8 @@ export interface RunRow {
   created_at: string;
 }
 
-export function recentRuns(limit = 25): RunRow[] {
-  return all<RunRow>(
+export async function recentRuns(limit = 25): Promise<RunRow[]> {
+  return await all<RunRow>(
     "SELECT * FROM agent_runs ORDER BY id DESC LIMIT ?",
     limit,
   );
@@ -422,13 +422,21 @@ export interface ProposalView extends ProposalRow {
 }
 
 /** One proposal, for a route that must check who is allowed to decide it. */
-export function proposalById(id: number): ProposalView | undefined {
-  return get<ProposalView>("SELECT * FROM agent_proposals WHERE id = ?", id);
+export async function proposalById(
+  id: number,
+): Promise<ProposalView | undefined> {
+  return await get<ProposalView>(
+    "SELECT * FROM agent_proposals WHERE id = ?",
+    id,
+  );
 }
 
 /** Everything filed by one person's submissions — their approval queue. */
-export function proposalsForOwner(ownerId: number, limit = 60): ProposalView[] {
-  return all<ProposalView>(
+export async function proposalsForOwner(
+  ownerId: number,
+  limit = 60,
+): Promise<ProposalView[]> {
+  return await all<ProposalView>(
     "SELECT * FROM agent_proposals WHERE owner_user_id = ? ORDER BY id DESC LIMIT ?",
     ownerId,
     limit,
@@ -439,11 +447,11 @@ export function proposalsForOwner(ownerId: number, limit = 60): ProposalView[] {
  * A department head's queue: everything drafted for their people, whoever
  * submitted the source.
  */
-export function proposalsForReviewer(
+export async function proposalsForReviewer(
   reviewerId: number,
   limit = 60,
-): ProposalView[] {
-  return all<ProposalView>(
+): Promise<ProposalView[]> {
+  return await all<ProposalView>(
     `SELECT * FROM agent_proposals
       WHERE reviewer_user_id = ? OR (reviewer_user_id IS NULL AND owner_user_id = ?)
       ORDER BY id DESC LIMIT ?`,
@@ -459,22 +467,28 @@ export function mayDecide(proposal: ProposalView, userId: number): boolean {
   return proposal.owner_user_id === userId;
 }
 
-export function runsForOwner(ownerId: number, limit = 20): RunRow[] {
-  return all<RunRow>(
+export async function runsForOwner(
+  ownerId: number,
+  limit = 20,
+): Promise<RunRow[]> {
+  return await all<RunRow>(
     "SELECT * FROM agent_runs WHERE owner_user_id = ? ORDER BY id DESC LIMIT ?",
     ownerId,
     limit,
   );
 }
 
-export function proposals(status: string | null, limit = 50): ProposalView[] {
+export async function proposals(
+  status: string | null,
+  limit = 50,
+): Promise<ProposalView[]> {
   return status
-    ? all<ProposalView>(
+    ? await all<ProposalView>(
         "SELECT * FROM agent_proposals WHERE status = ? ORDER BY id DESC LIMIT ?",
         status,
         limit,
       )
-    : all<ProposalView>(
+    : await all<ProposalView>(
         "SELECT * FROM agent_proposals ORDER BY id DESC LIMIT ?",
         limit,
       );

@@ -1,4 +1,4 @@
-import { all, run } from "../db";
+import { all, run } from "../pg";
 import type { Ref } from "./assistant";
 
 /**
@@ -47,8 +47,11 @@ function parseRefs(json: string): Ref[] {
 }
 
 /** The conversation, oldest first — the order it is read in. */
-export function chatHistory(userId: number, limit = KEEP): StoredTurn[] {
-  const rows = all<Row>(
+export async function chatHistory(
+  userId: number,
+  limit = KEEP,
+): Promise<StoredTurn[]> {
+  const rows = await all<Row>(
     `SELECT id, role, content, refs FROM assistant_messages
       WHERE user_id = ? ORDER BY id DESC LIMIT ?`,
     userId,
@@ -69,18 +72,18 @@ export function chatHistory(userId: number, limit = KEEP): StoredTurn[] {
  * its own would come back after a refresh as something nobody ever replied
  * to, which reads as an answer that was lost rather than one that failed.
  */
-export function appendExchange(
+export async function appendExchange(
   userId: number,
   question: string,
   answer: string,
   refs: Ref[],
-): void {
-  run(
+): Promise<void> {
+  await run(
     "INSERT INTO assistant_messages (user_id, role, content) VALUES (?, 'user', ?)",
     userId,
     question.slice(0, 4000),
   );
-  run(
+  await run(
     "INSERT INTO assistant_messages (user_id, role, content, refs) VALUES (?, 'assistant', ?, ?)",
     userId,
     answer.slice(0, 20_000),
@@ -88,7 +91,7 @@ export function appendExchange(
   );
   // Trim here rather than on a schedule: the table only grows when somebody
   // is using it, so the moment of growth is the cheapest moment to prune.
-  run(
+  await run(
     `DELETE FROM assistant_messages
       WHERE user_id = ? AND id NOT IN (
         SELECT id FROM assistant_messages WHERE user_id = ? ORDER BY id DESC LIMIT ?
@@ -99,6 +102,6 @@ export function appendExchange(
   );
 }
 
-export function clearChat(userId: number): void {
-  run("DELETE FROM assistant_messages WHERE user_id = ?", userId);
+export async function clearChat(userId: number): Promise<void> {
+  await run("DELETE FROM assistant_messages WHERE user_id = ?", userId);
 }

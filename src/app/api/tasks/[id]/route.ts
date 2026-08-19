@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, now, run } from "@/lib/db";
+import { get, now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { authorizeTransition } from "@/lib/task-machine";
@@ -21,7 +21,7 @@ export async function POST(
     comment?: string;
   };
 
-  const task = get<Task>("SELECT * FROM tasks WHERE id = ?", taskId);
+  const task = await get<Task>("SELECT * FROM tasks WHERE id = ?", taskId);
   if (!task) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const decision = authorizeTransition(action ?? "", task, user.id);
@@ -55,8 +55,8 @@ export async function POST(
   }
 
   values.push(taskId);
-  run(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`, ...values);
-  run(
+  await run(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`, ...values);
+  await run(
     "INSERT INTO task_events (task_id, user_id, action, comment, created_at) VALUES (?,?,?,?,?)",
     taskId,
     user.id,

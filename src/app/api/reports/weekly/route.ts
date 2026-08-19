@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { all } from "@/lib/db";
+import { all } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { renderWeeklyText, weeklyReport } from "@/lib/reports";
 import { isManager } from "@/lib/types";
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
   }
 
-  const report = weeklyReport(offset);
+  const report = await weeklyReport(offset);
 
   if (format === "text") {
     return NextResponse.json({
@@ -40,10 +40,12 @@ export async function GET(request: Request) {
       // Who should receive it: everyone who commands a vertical and has
       // linked Telegram. The bot resolves nothing itself.
       recipients: fromBot
-        ? all<{ id: number; telegram_id: number | null }>(
-            `SELECT id, telegram_id FROM users
-              WHERE is_active = 1 AND telegram_id IS NOT NULL
-                AND role IN ('RAIS','UYUSHMA_RAISI','LOYIHA_RAHBARI','BOLIM_RAHBARI','AI_LAB')`,
+        ? (
+            await all<{ id: number; telegram_id: number | null }>(
+              `SELECT id, telegram_id FROM users
+                WHERE is_active = 1 AND telegram_id IS NOT NULL
+                  AND role IN ('RAIS','UYUSHMA_RAISI','LOYIHA_RAHBARI','BOLIM_RAHBARI','AI_LAB')`,
+            )
           ).map((row) => row.id)
         : [],
     });

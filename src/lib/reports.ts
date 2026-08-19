@@ -1,4 +1,4 @@
-import { all, get } from "./db";
+import { all, get, now } from "./pg";
 import type { Role } from "./types";
 
 /**
@@ -109,11 +109,14 @@ export interface WeeklyReport {
  * rather than a pile of joins: each metric reads a different table with a
  * different predicate, and a join fan-out would multiply the counts.
  */
-export function weeklyReport(offset = 0): WeeklyReport {
+export async function weeklyReport(offset = 0): Promise<WeeklyReport> {
   const week = weekBounds(offset);
   const { from, to } = week;
+  // Postgres has no date('now'); the deadline column is TEXT 'YYYY-MM-DD', so
+  // today arrives from JS in the same shape and compares lexicographically.
+  const today = now().slice(0, 10);
 
-  const rows = all<WeeklyRow>(
+  const rows = await all<WeeklyRow>(
     `SELECT u.id, u.login, u.full_name, u.role, u.department,
        (SELECT COUNT(*) FROM tasks t
           WHERE t.from_user_id = u.id AND t.created_at >= ? AND t.created_at < ?) AS given,
@@ -140,7 +143,7 @@ export function weeklyReport(offset = 0): WeeklyReport {
             AND e.created_at >= ? AND e.created_at < ?) AS approvedForOthers,
        (SELECT COUNT(*) FROM tasks t
           WHERE t.to_user_id = u.id AND t.deadline IS NOT NULL
-            AND t.deadline < date('now')
+            AND t.deadline < ?
             AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
        (SELECT COUNT(*) FROM messages m
           WHERE m.from_user_id = u.id AND m.created_at >= ? AND m.created_at < ?) AS messages,
@@ -149,13 +152,15 @@ export function weeklyReport(offset = 0): WeeklyReport {
      FROM users u
      WHERE u.is_active = 1
      ORDER BY done DESC, submitted DESC, u.full_name`,
-    // Ten `from`/`to` pairs, in the order the subqueries appear. `overdue` is
-    // the odd one out: it asks about right now, not about the week, so it
-    // carries no placeholders and must not be counted here.
-    ...Array.from({ length: 10 }, () => [from, to]).flat(),
+    // Ten `from`/`to` pairs, in the order the subqueries appear, with `today`
+    // threaded in at the position `overdue` occupies: that one asks about
+    // right now rather than about the week, so it takes a date, not a range.
+    ...Array.from({ length: 8 }, () => [from, to]).flat(),
+    today,
+    ...Array.from({ length: 2 }, () => [from, to]).flat(),
   );
 
-  const totals = get<Omit<WeeklyTotals, "completion" | "active">>(
+  const totals = (await get<Omit<WeeklyTotals, "completion" | "active">>(
     `SELECT
        (SELECT COUNT(*) FROM tasks WHERE created_at >= ? AND created_at < ?) AS created,
        (SELECT COUNT(*) FROM task_events WHERE action = 'TASDIQLANDI'
@@ -164,7 +169,7 @@ export function weeklyReport(offset = 0): WeeklyReport {
           AND created_at >= ? AND created_at < ?) AS submitted,
        (SELECT COUNT(*) FROM task_events WHERE action = 'QAYTARILDI'
           AND created_at >= ? AND created_at < ?) AS returned,
-       (SELECT COUNT(*) FROM tasks WHERE deadline IS NOT NULL AND deadline < date('now')
+       (SELECT COUNT(*) FROM tasks WHERE deadline IS NOT NULL AND deadline < ?
           AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
        (SELECT COUNT(*) FROM messages WHERE created_at >= ? AND created_at < ?) AS messages`,
     from,
@@ -175,9 +180,10 @@ export function weeklyReport(offset = 0): WeeklyReport {
     to,
     from,
     to,
+    today,
     from,
     to,
-  )!;
+  ))!;
 
   const active = rows.filter(
     (row) => row.actions > 0 || row.messages > 0,

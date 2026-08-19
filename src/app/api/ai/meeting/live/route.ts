@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { NextResponse } from "next/server";
-import { get, now, run } from "@/lib/db";
+import { get, insert, now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { canSubmitToAi } from "@/lib/agents/access";
 import { resolvePath, safeName, store } from "@/lib/uploads";
@@ -96,7 +96,10 @@ export async function POST(request: Request) {
   let row: LiveRow | undefined;
 
   if (Number.isInteger(sessionId) && sessionId > 0) {
-    row = get<LiveRow>("SELECT * FROM meeting_live WHERE id = ?", sessionId);
+    row = await get<LiveRow>(
+      "SELECT * FROM meeting_live WHERE id = ?",
+      sessionId,
+    );
     // Someone else's meeting is not yours to append to.
     if (!row || row.owner_id !== user.id)
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
@@ -106,7 +109,9 @@ export async function POST(request: Request) {
     const title = str(form.get("title"), 160) ?? "Uchrashuv";
     // The first chunk carries the container header, so it is the file.
     const stored = store(bytes, "voice", "audio/webm", safeName("meeting", "voice"));
-    run(
+    // RETURNING, not `SELECT MAX(id)`: two people can start a meeting in the
+    // same second, and then the highest id is not the row this call wrote.
+    const created = await insert(
       `INSERT INTO meeting_live (owner_id, title, lang, audio_key, created_at, updated_at)
        VALUES (?,?,?,?,?,?)`,
       user.id,
@@ -116,10 +121,10 @@ export async function POST(request: Request) {
       now(),
       now(),
     );
-    const created = Number(
-      get<{ id: number }>("SELECT MAX(id) AS id FROM meeting_live")!.id,
-    );
-    row = get<LiveRow>("SELECT * FROM meeting_live WHERE id = ?", created)!;
+    row = (await get<LiveRow>(
+      "SELECT * FROM meeting_live WHERE id = ?",
+      created,
+    ))!;
   }
 
   const path = row.audio_key ? resolvePath(row.audio_key) : null;
@@ -145,7 +150,7 @@ export async function POST(request: Request) {
     ? `${row.transcript}${row.transcript ? " " : ""}${fresh}`
     : row.transcript;
 
-  run(
+  await run(
     `UPDATE meeting_live
         SET transcript = ?, offset_ms = ?, rounds = rounds + 1, updated_at = ?
       WHERE id = ?`,
@@ -165,9 +170,9 @@ export async function POST(request: Request) {
     const update = await updateLiveState(
       state,
       segment,
-      roomRoster(),
+      await roomRoster(),
       lang,
-      recallMemory(),
+      await recallMemory(),
       row.title,
     );
 
@@ -179,7 +184,7 @@ export async function POST(request: Request) {
         questions: update.questions,
       };
       analysed = true;
-      run(
+      await run(
         `UPDATE meeting_live
             SET state = ?, analyzed_len = ?,
                 tokens_in = tokens_in + ?, tokens_out = tokens_out + ?,

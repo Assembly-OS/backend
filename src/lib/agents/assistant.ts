@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { all, get } from "@/lib/db";
+import { all, get } from "@/lib/pg";
 import { isConfigured } from "./claude";
 import { today, viewStatus } from "@/lib/crm";
 import { assignableUsers } from "@/lib/queries";
@@ -223,20 +223,19 @@ function like(value: unknown): string {
   return `%${String(value ?? "").slice(0, 120)}%`;
 }
 
-function runTool(
+async function runTool(
   name: string,
   input: Record<string, unknown>,
   context: ToolContext,
-): unknown {
+): Promise<unknown> {
   switch (name) {
     case "find_companies": {
       const where: string[] = [];
       const params: (string | number)[] = [];
       if (input.query) {
         where.push(
-          `(name LIKE ? COLLATE NOCASE OR industry LIKE ? COLLATE NOCASE
-            OR services LIKE ? COLLATE NOCASE OR city LIKE ? COLLATE NOCASE
-            OR description LIKE ? COLLATE NOCASE)`,
+          `(name ILIKE ? OR industry ILIKE ? OR services ILIKE ?
+            OR city ILIKE ? OR description ILIKE ?)`,
         );
         params.push(...Array(5).fill(like(input.query)));
       }
@@ -244,7 +243,7 @@ function runTool(
         where.push("status = ?");
         params.push(String(input.status));
       }
-      const rows = all<Record<string, unknown>>(
+      const rows = await all<Record<string, unknown>>(
         `SELECT id, name, industry, services, city, country, status,
                 head_name, phone, email, website,
                 COALESCE(last_contact_at, last_seen) AS last_contact
@@ -265,7 +264,7 @@ function runTool(
 
     case "company_profile": {
       const id = Number(input.company_id);
-      const company = get<Record<string, unknown>>(
+      const company = await get<Record<string, unknown>>(
         "SELECT * FROM partners WHERE id = ?",
         id,
       );
@@ -277,7 +276,7 @@ function runTool(
         href: `/companies/${id}`,
       });
 
-      const meetings = all<Record<string, unknown>>(
+      const meetings = await all<Record<string, unknown>>(
         `SELECT m.id, m.title, COALESCE(m.held_at, m.created_at) AS date,
                 m.participants, c.summary
            FROM meetings m
@@ -299,13 +298,13 @@ function runTool(
 
       return {
         company,
-        contacts: all(
+        contacts: await all(
           `SELECT first_name, last_name, position, phone, email, telegram, is_head
              FROM contacts WHERE company_id = ? ORDER BY is_head DESC`,
           id,
         ),
         meetings,
-        agreements: agreementRows({ company_id: id }, context),
+        agreements: await agreementRows({ company_id: id }, context),
       };
     }
 
@@ -313,22 +312,25 @@ function runTool(
       const where: string[] = [];
       const params: (string | number)[] = [];
       if (input.query) {
-        where.push("(m.title LIKE ? COLLATE NOCASE OR m.transcript LIKE ? COLLATE NOCASE)");
+        where.push("(m.title ILIKE ? OR m.transcript ILIKE ?)");
         params.push(like(input.query), like(input.query));
       }
       if (input.company_id) {
         where.push("m.company_id = ?");
         params.push(Number(input.company_id));
       }
+      // substr, not date(): created_at is TEXT here, and Postgres has no
+      // date(text). Cutting the first ten characters yields the same
+      // 'YYYY-MM-DD' string held_at holds, so the two stay comparable.
       if (input.from) {
-        where.push("COALESCE(m.held_at, date(m.created_at)) >= ?");
+        where.push("COALESCE(m.held_at, substr(m.created_at, 1, 10)) >= ?");
         params.push(String(input.from));
       }
       if (input.to) {
-        where.push("COALESCE(m.held_at, date(m.created_at)) <= ?");
+        where.push("COALESCE(m.held_at, substr(m.created_at, 1, 10)) <= ?");
         params.push(String(input.to));
       }
-      const rows = all<Record<string, unknown>>(
+      const rows = await all<Record<string, unknown>>(
         `SELECT m.id, m.title, COALESCE(m.held_at, m.created_at) AS date,
                 m.participants, p.name AS company, m.company_id, c.summary
            FROM meetings m
@@ -352,7 +354,7 @@ function runTool(
 
     case "meeting_detail": {
       const id = Number(input.meeting_id);
-      const meeting = get<Record<string, unknown>>(
+      const meeting = await get<Record<string, unknown>>(
         `SELECT m.id, m.title, COALESCE(m.held_at, m.created_at) AS date,
                 m.place, m.participants, m.description, m.next_steps,
                 p.name AS company, m.company_id
@@ -367,7 +369,7 @@ function runTool(
         label: String(meeting.title),
         href: meeting.company_id ? `/companies/${meeting.company_id}` : "/meetings",
       });
-      const conclusion = get<Record<string, unknown>>(
+      const conclusion = await get<Record<string, unknown>>(
         "SELECT summary, key_points, decisions FROM meeting_conclusions WHERE meeting_id = ? AND lang = ?",
         id,
         context.lang,
@@ -377,19 +379,19 @@ function runTool(
         summary: conclusion?.summary ?? null,
         key_points: safeList(conclusion?.key_points),
         decisions: safeList(conclusion?.decisions),
-        agreements: agreementRows({ meeting_id: id }, context),
+        agreements: await agreementRows({ meeting_id: id }, context),
       };
     }
 
     case "find_agreements":
-      return { agreements: agreementRows(input, context) };
+      return { agreements: await agreementRows(input, context) };
 
     case "find_tasks": {
       const where: string[] = [];
       const params: (string | number)[] = [];
       // Scoping, not filtering: a manager sees their people's work, everyone
       // else sees their own. Enforced here so no prompt can widen it.
-      const visible = assignableUsers(context.user).map((person) => person.id);
+      const visible = (await assignableUsers(context.user)).map((person) => person.id);
       const scope = [...new Set([context.user.id, ...visible])];
       where.push(
         `(t.to_user_id IN (${scope.map(() => "?").join(",")}) OR t.from_user_id = ?)`,
@@ -397,11 +399,11 @@ function runTool(
       params.push(...scope, context.user.id);
 
       if (input.query) {
-        where.push("(t.title LIKE ? COLLATE NOCASE OR t.description LIKE ? COLLATE NOCASE)");
+        where.push("(t.title ILIKE ? OR t.description ILIKE ?)");
         params.push(like(input.query), like(input.query));
       }
       if (input.assignee_name) {
-        where.push("u.full_name LIKE ? COLLATE NOCASE");
+        where.push("u.full_name ILIKE ?");
         params.push(like(input.assignee_name));
       }
       if (input.open_only) where.push("t.status NOT IN ('BAJARILDI','RAD_ETILDI')");
@@ -412,7 +414,7 @@ function runTool(
         params.push(today());
       }
 
-      const rows = all<Record<string, unknown>>(
+      const rows = await all<Record<string, unknown>>(
         `SELECT t.id, t.code, t.title, t.status, t.priority, t.deadline,
                 u.full_name AS assignee, f.full_name AS author
            FROM tasks t
@@ -434,10 +436,10 @@ function runTool(
     }
 
     case "find_people": {
-      const rows = all<Record<string, unknown>>(
+      const rows = await all<Record<string, unknown>>(
         `SELECT id, full_name, login, role, department, position
            FROM users WHERE is_active = 1
-            ${input.query ? "AND (full_name LIKE ? COLLATE NOCASE OR login LIKE ? COLLATE NOCASE OR position LIKE ? COLLATE NOCASE)" : ""}
+            ${input.query ? "AND (full_name ILIKE ? OR login ILIKE ? OR position ILIKE ?)" : ""}
           ORDER BY full_name LIMIT 30`,
         ...(input.query ? [like(input.query), like(input.query), like(input.query)] : []),
       );
@@ -468,10 +470,10 @@ function safeList(value: unknown): string[] {
 }
 
 /** Shared by three tools, so "overdue" means the same thing in all of them. */
-function agreementRows(
+async function agreementRows(
   input: Record<string, unknown>,
   context: ToolContext,
-): Record<string, unknown>[] {
+): Promise<Record<string, unknown>[]> {
   const where: string[] = [];
   const params: (string | number)[] = [];
 
@@ -489,7 +491,7 @@ function agreementRows(
     params.push(Number(input.meeting_id));
   }
   if (input.owner_name) {
-    where.push("(u.full_name LIKE ? COLLATE NOCASE OR a.owner_name LIKE ? COLLATE NOCASE)");
+    where.push("(u.full_name ILIKE ? OR a.owner_name ILIKE ?)");
     params.push(like(input.owner_name), like(input.owner_name));
   }
   if (input.due_before) {
@@ -503,7 +505,7 @@ function agreementRows(
     params.push(today());
   }
 
-  const rows = all<Record<string, unknown>>(
+  const rows = await all<Record<string, unknown>>(
     `SELECT a.id, a.description, a.deadline, a.status, a.priority, a.source,
             COALESCE(u.full_name, a.owner_name) AS owner,
             p.name AS company, a.company_id, m.title AS meeting
@@ -648,24 +650,26 @@ export async function askAssistant(
       // them teaches the model to stop asking for things in parallel.
       messages.push({
         role: "user",
-        content: calls.map((call) => {
-          steps++;
-          let result: unknown;
-          try {
-            result = runTool(
-              call.name,
-              (call.input ?? {}) as Record<string, unknown>,
-              context,
-            );
-          } catch (error) {
-            result = { error: String(error).slice(0, 200) };
-          }
-          return {
-            type: "tool_result" as const,
-            tool_use_id: call.id,
-            content: JSON.stringify(result).slice(0, 60_000),
-          };
-        }),
+        content: await Promise.all(
+          calls.map(async (call) => {
+            steps++;
+            let result: unknown;
+            try {
+              result = await runTool(
+                call.name,
+                (call.input ?? {}) as Record<string, unknown>,
+                context,
+              );
+            } catch (error) {
+              result = { error: String(error).slice(0, 200) };
+            }
+            return {
+              type: "tool_result" as const,
+              tool_use_id: call.id,
+              content: JSON.stringify(result).slice(0, 60_000),
+            };
+          }),
+        ),
       });
     }
 

@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
   const mine = new URL(request.url).searchParams.get("mine") === "1";
-  return NextResponse.json(agreementBoard(mine ? user.id : undefined));
+  return NextResponse.json(await agreementBoard(mine ? user.id : undefined));
 }
 
 export async function POST(request: Request) {
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "DESCRIPTION_REQUIRED" }, { status: 400 });
 
   const deadline = str(body.deadline, 10);
-  const id = createAgreement({
+  const id = await createAgreement({
     company_id: parseId(body.company_id),
     meeting_id: parseId(body.meeting_id),
     description,

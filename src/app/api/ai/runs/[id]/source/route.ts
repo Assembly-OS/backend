@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { NextResponse } from "next/server";
-import { get } from "@/lib/db";
+import { get } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { canSubmitToAi } from "@/lib/agents/access";
 import { parseRange, resolvePath } from "@/lib/uploads";
@@ -24,7 +24,7 @@ export async function GET(
   const runId = parseId((await params).id);
   if (!runId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const runRow = get<{
+  const runRow = await get<{
     source_ref: string | null;
     source_kind: string | null;
     owner_user_id: number | null;

@@ -1,4 +1,4 @@
-import { all, get } from "./db";
+import { all, get } from "./pg";
 import type { MessageKind, Role } from "./types";
 
 /**
@@ -31,8 +31,8 @@ export interface StaffRow {
 }
 
 /** Everyone on the books — active first, then alphabetical. */
-export function staff(): StaffRow[] {
-  return all<StaffRow>(
+export async function staff(): Promise<StaffRow[]> {
+  return await all<StaffRow>(
     `SELECT u.id, u.login, u.full_name, u.role, u.department, u.position,
             u.phone, u.email, u.is_active, u.last_seen, u.created_at,
             u.manager_id, m.full_name AS manager_name,
@@ -45,19 +45,25 @@ export function staff(): StaffRow[] {
 }
 
 /** Candidates for the "reports to" field: anyone still active. */
-export function managerOptions(): { id: number; label: string }[] {
-  return all<{ id: number; full_name: string; login: string }>(
+export async function managerOptions(): Promise<
+  { id: number; label: string }[]
+> {
+  const rows = await all<{ id: number; full_name: string; login: string }>(
     "SELECT id, full_name, login FROM users WHERE is_active = 1 ORDER BY full_name",
-  ).map((row) => ({ id: row.id, label: `${row.full_name} (@${row.login})` }));
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    label: `${row.full_name} (@${row.login})`,
+  }));
 }
 
 /** True when the login is already taken (comparison is case-insensitive). */
-export function loginTaken(login: string): boolean {
+export async function loginTaken(login: string): Promise<boolean> {
   return (
-    get<{ id: number }>(
-      "SELECT id FROM users WHERE login = ? COLLATE NOCASE",
+    (await get<{ id: number }>(
+      "SELECT id FROM users WHERE lower(login) = lower(?)",
       login,
-    ) !== undefined
+    )) !== undefined
   );
 }
 
@@ -85,11 +91,11 @@ export interface ConversationSummary {
  * identified by its unordered pair of participants, so `min`/`max` fold the
  * two directions of the same conversation into one row.
  */
-export function allConversations(): ConversationSummary[] {
-  return all<ConversationSummary>(
+export async function allConversations(): Promise<ConversationSummary[]> {
+  return await all<ConversationSummary>(
     `WITH pairs AS (
-       SELECT MIN(from_user_id, to_user_id) AS a,
-              MAX(from_user_id, to_user_id) AS b,
+       SELECT LEAST(from_user_id, to_user_id) AS a,
+              GREATEST(from_user_id, to_user_id) AS b,
               COUNT(*) AS total,
               MAX(id) AS last_id
          FROM messages
@@ -125,11 +131,11 @@ export interface GroupOverview {
 }
 
 /** Every group conversation in the Assembly, most recently active first. */
-export function allGroups(): GroupOverview[] {
-  return all<GroupOverview>(
+export async function allGroups(): Promise<GroupOverview[]> {
+  return await all<GroupOverview>(
     `SELECT g.id, g.title,
             (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS members,
-            (SELECT GROUP_CONCAT(u.full_name, ', ')
+            (SELECT string_agg(u.full_name, ', ')
                FROM group_members m JOIN users u ON u.id = m.user_id
               WHERE m.group_id = g.id) AS member_names,
             (SELECT COUNT(*) FROM messages x WHERE x.group_id = g.id) AS total,
@@ -147,11 +153,11 @@ export function allGroups(): GroupOverview[] {
 }
 
 /** One group's full history, oldest first — the same shape as a DM audit. */
-export function groupConversation(
+export async function groupConversation(
   groupId: number,
   limit = 300,
-): AuditMessage[] {
-  return all<AuditMessage>(
+): Promise<AuditMessage[]> {
+  const rows = await all<AuditMessage>(
     `SELECT m.id, m.from_user_id, u.full_name AS from_name, u.login AS from_login,
             m.body, m.kind, m.file_name, m.file_size, m.duration,
             m.created_at, m.read_at
@@ -161,7 +167,8 @@ export function groupConversation(
       LIMIT ?`,
     groupId,
     limit,
-  ).reverse();
+  );
+  return rows.reverse();
 }
 
 export interface AuditMessage {
@@ -179,12 +186,12 @@ export interface AuditMessage {
 }
 
 /** One full conversation, oldest first. Capped so a long thread stays loadable. */
-export function conversation(
+export async function conversation(
   aId: number,
   bId: number,
   limit = 300,
-): AuditMessage[] {
-  return all<AuditMessage>(
+): Promise<AuditMessage[]> {
+  const rows = await all<AuditMessage>(
     `SELECT m.id, m.from_user_id, u.full_name AS from_name, u.login AS from_login,
             m.body, m.kind, m.file_name, m.file_size, m.duration,
             m.created_at, m.read_at
@@ -199,15 +206,20 @@ export function conversation(
     bId,
     aId,
     limit,
-  ).reverse();
+  );
+  return rows.reverse();
 }
 
 /** Storage key behind one message, so deleting it can take the blob too. */
-export function messageFileKey(messageId: number): string | null {
+export async function messageFileKey(
+  messageId: number,
+): Promise<string | null> {
   return (
-    get<{ file_key: string | null }>(
-      "SELECT file_key FROM messages WHERE id = ?",
-      messageId,
+    (
+      await get<{ file_key: string | null }>(
+        "SELECT file_key FROM messages WHERE id = ?",
+        messageId,
+      )
     )?.file_key ?? null
   );
 }
@@ -216,10 +228,12 @@ export function messageFileKey(messageId: number): string | null {
  * How many active chairmen remain. Demoting or deactivating the last one would
  * leave the Assembly with nobody able to hand out work, so the routes refuse.
  */
-export function activeRaisCount(): number {
+export async function activeRaisCount(): Promise<number> {
   return Number(
-    get<{ c: number }>(
-      "SELECT COUNT(*) AS c FROM users WHERE role = 'RAIS' AND is_active = 1",
+    (
+      await get<{ c: number }>(
+        "SELECT COUNT(*) AS c FROM users WHERE role = 'RAIS' AND is_active = 1",
+      )
     )?.c ?? 0,
   );
 }

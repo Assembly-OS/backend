@@ -416,7 +416,7 @@ export async function analyzeMeeting(
           content:
             `Uchrashuv: ${title}\n\nXodimlar:\n${roster(candidates)}` +
             memoryBlock(facts) +
-            partnerHistory() +
+            (await partnerHistory()) +
             `\n\nBayonnoma (avtomatik tanilgan matn):\n"""\n${transcript.slice(0, 60_000)}\n"""`,
         },
       ],

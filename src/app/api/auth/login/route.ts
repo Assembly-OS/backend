@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get } from "@/lib/db";
+import { get } from "@/lib/pg";
 import {
   createToken,
   isSecureRequest,
@@ -35,8 +35,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const user = get<Row>(
-    "SELECT * FROM users WHERE login = ? COLLATE NOCASE AND is_active = 1",
+  const user = await get<Row>(
+    "SELECT * FROM users WHERE lower(login) = lower(?) AND is_active = 1",
     login.trim(),
   );
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, run } from "@/lib/db";
+import { get, run } from "@/lib/pg";
 import { hashPassword } from "@/lib/auth";
 import { publish } from "@/lib/events";
 import { hasAdminSession } from "@/lib/admin-auth";
@@ -30,7 +30,7 @@ export async function PATCH(
   const targetId = parseId((await params).id);
   if (!targetId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const target = get<Target>(
+  const target = await get<Target>(
     "SELECT id, role, is_active FROM users WHERE id = ?",
     targetId,
   );
@@ -44,10 +44,10 @@ export async function PATCH(
     // The Assembly needs a chairman: the last active one stays active. The
     // administrator is not a staff member, so there is no "self" to protect —
     // locking the panel out of its own account is impossible by construction.
-    if (!activate && target.role === "RAIS" && activeRaisCount() <= 1)
+    if (!activate && target.role === "RAIS" && (await activeRaisCount()) <= 1)
       return NextResponse.json({ error: "LAST_RAIS" }, { status: 400 });
 
-    run(
+    await run(
       "UPDATE users SET is_active = ? WHERE id = ?",
       activate ? 1 : 0,
       targetId,
@@ -61,7 +61,7 @@ export async function PATCH(
     if (password.length < MIN_PASSWORD)
       return NextResponse.json({ error: "WEAK_PASSWORD" }, { status: 400 });
 
-    run(
+    await run(
       "UPDATE users SET password_hash = ? WHERE id = ?",
       hashPassword(password),
       targetId,
@@ -77,7 +77,7 @@ export async function PATCH(
     const role = oneOf(body.role, ROLES, target.role);
     // Same reasoning as above, from the other direction: do not demote the only
     // chairman into a role that cannot hand out work.
-    if (target.role === "RAIS" && role !== "RAIS" && activeRaisCount() <= 1)
+    if (target.role === "RAIS" && role !== "RAIS" && (await activeRaisCount()) <= 1)
       return NextResponse.json({ error: "LAST_RAIS" }, { status: 400 });
 
     const department = DEPARTMENTS.includes(body.department as Department)
@@ -88,12 +88,14 @@ export async function PATCH(
     const manager =
       managerId === null || managerId === targetId
         ? null
-        : (get<{ id: number }>(
-            "SELECT id FROM users WHERE id = ? AND is_active = 1",
-            managerId,
+        : ((
+            await get<{ id: number }>(
+              "SELECT id FROM users WHERE id = ? AND is_active = 1",
+              managerId,
+            )
           )?.id ?? null);
 
-    run(
+    await run(
       `UPDATE users SET full_name = ?, role = ?, department = ?, position = ?,
                         manager_id = ?, phone = ?, email = ?
         WHERE id = ?`,
@@ -137,7 +139,7 @@ export async function DELETE(
   const targetId = parseId((await params).id);
   if (!targetId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const target = get<Target>(
+  const target = await get<Target>(
     "SELECT id, role, is_active FROM users WHERE id = ?",
     targetId,
   );
@@ -145,11 +147,13 @@ export async function DELETE(
 
   // The Assembly needs a chairman, and deleting is even less reversible than
   // deactivating — the same guard applies, harder.
-  if (target.role === "RAIS" && activeRaisCount() <= 1)
+  if (target.role === "RAIS" && (await activeRaisCount()) <= 1)
     return NextResponse.json({ error: "LAST_RAIS" }, { status: 400 });
 
   try {
-    run("DELETE FROM users WHERE id = ?", targetId);
+    // Awaited inside the try on purpose: the driver reports the foreign key
+    // violation by rejecting, and an unawaited call would escape this catch.
+    await run("DELETE FROM users WHERE id = ?", targetId);
   } catch {
     return NextResponse.json({ error: "HAS_HISTORY" }, { status: 409 });
   }

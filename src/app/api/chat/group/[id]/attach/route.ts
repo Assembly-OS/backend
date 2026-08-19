@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { now, run } from "@/lib/db";
+import { now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import {
@@ -31,7 +31,7 @@ export async function POST(
 
   const groupId = parseId((await params).id);
   if (!groupId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
-  if (!isGroupMember(groupId, user.id))
+  if (!(await isGroupMember(groupId, user.id)))
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   let form: FormData;
@@ -72,7 +72,7 @@ export async function POST(
   const name = safeName(blob.name ?? "", kind);
   const stored = store(bytes, kind, mime, name);
 
-  run(
+  await run(
     `INSERT INTO messages
        (from_user_id, group_id, body, kind, file_name, file_size, file_mime, file_key, duration, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -88,8 +88,8 @@ export async function POST(
     now(),
   );
 
-  markGroupRead(groupId, user.id);
-  publish(...groupMembers(groupId).map((member) => member.id));
+  await markGroupRead(groupId, user.id);
+  publish(...(await groupMembers(groupId)).map((member) => member.id));
 
-  return NextResponse.json({ messages: groupThread(groupId) });
+  return NextResponse.json({ messages: await groupThread(groupId) });
 }

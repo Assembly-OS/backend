@@ -62,7 +62,10 @@ ENV NODE_ENV=production \
 
 COPY --from=build --chown=10001:10001 /app/.next/standalone ./
 COPY --from=build --chown=10001:10001 /app/.next/static ./.next/static
-COPY --from=build --chown=10001:10001 /app/db/schema.sql ./db/schema.sql
+# migrate() в instrumentation.ts — единственный, кто создаёт схему, и читает
+# он db/schema.postgres.sql. Отсутствие файла он проглатывает молча, поэтому
+# со старым schema.sql контейнер поднимался с пустой базой без единой таблицы.
+COPY --from=build --chown=10001:10001 /app/db/schema.postgres.sql ./db/schema.postgres.sql
 COPY --from=whisper-build /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
 RUN install -d -o 10001 -g 10001 /data /data/uploads /app/.next/cache \
     && install -d -o root -g root -m 0755 /models

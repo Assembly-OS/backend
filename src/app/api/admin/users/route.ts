@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, now, run } from "@/lib/db";
+import { get, insert, now } from "@/lib/pg";
 import { hashPassword } from "@/lib/auth";
 import { publish } from "@/lib/events";
 import { hasAdminSession } from "@/lib/admin-auth";
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "BAD_LOGIN" }, { status: 400 });
   if (password.length < MIN_PASSWORD)
     return NextResponse.json({ error: "WEAK_PASSWORD" }, { status: 400 });
-  if (loginTaken(login))
+  if (await loginTaken(login))
     return NextResponse.json({ error: "LOGIN_TAKEN" }, { status: 409 });
 
   const role = oneOf(body.role, ROLES, "ISHCHI");
@@ -42,12 +42,16 @@ export async function POST(request: Request) {
   const manager =
     managerId === null
       ? null
-      : (get<{ id: number }>(
-          "SELECT id FROM users WHERE id = ? AND is_active = 1",
-          managerId,
+      : ((
+          await get<{ id: number }>(
+            "SELECT id FROM users WHERE id = ? AND is_active = 1",
+            managerId,
+          )
         )?.id ?? null);
 
-  run(
+  // RETURNING rather than a follow-up SELECT: the id comes back with the write,
+  // and one round trip fewer counts now that the database is over a socket.
+  const created = await insert(
     `INSERT INTO users (login, password_hash, full_name, role, department, position,
                         manager_id, phone, email, lang, is_active, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,1,?)`,
@@ -64,13 +68,8 @@ export async function POST(request: Request) {
     now(),
   );
 
-  const created = get<{ id: number }>(
-    "SELECT id FROM users WHERE login = ?",
-    login,
-  )!;
-
   // The new colleague shows up in everyone's staff directory right away.
-  publish(created.id);
+  publish(created);
 
-  return NextResponse.json({ ok: true, id: created.id, login });
+  return NextResponse.json({ ok: true, id: created, login });
 }

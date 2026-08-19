@@ -13,14 +13,14 @@ export async function POST(
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
   const agreementId = parseId((await params).id);
-  const agreement = agreementId ? agreementById(agreementId) : undefined;
+  const agreement = agreementId ? await agreementById(agreementId) : undefined;
   if (!agreement)
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
   if (!canSettle(user, agreement.owner_user_id))
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const body = (await request.json()) as { status?: unknown };
-  setAgreementStatus(
+  await setAgreementStatus(
     agreement.id,
     oneOf(body.status, AGREEMENT_STATUSES, "IN_PROGRESS"),
   );

@@ -1,4 +1,4 @@
-import { get } from "./db";
+import { get } from "./pg";
 import { id as parseId, oneOf, str } from "./validate";
 
 /**
@@ -37,7 +37,9 @@ function bounded(value: unknown, min: number, max: number, fallback: number) {
   return Math.min(max, Math.max(min, n));
 }
 
-export function projectFields(body: Record<string, unknown>): ProjectFields {
+export async function projectFields(
+  body: Record<string, unknown>,
+): Promise<ProjectFields> {
   const owner = body.ownerId == null ? null : parseId(body.ownerId);
 
   return {
@@ -51,21 +53,21 @@ export function projectFields(body: Record<string, unknown>): ProjectFields {
     ownerId:
       owner === null
         ? null
-        : (get<{ id: number }>(
+        : ((await get<{ id: number }>(
             "SELECT id FROM users WHERE id = ? AND is_active = 1",
             owner,
-          )?.id ?? null),
+          ))?.id ?? null),
     deadline: str(body.deadline, 10),
     siteNo: body.siteNo == null ? null : parseId(body.siteNo),
   };
 }
 
 /** True when the code is already taken (comparison is case-insensitive). */
-export function codeTaken(code: string): boolean {
+export async function codeTaken(code: string): Promise<boolean> {
   return (
-    get<{ id: number }>(
-      "SELECT id FROM loyihalar WHERE code = ? COLLATE NOCASE",
+    (await get<{ id: number }>(
+      "SELECT id FROM loyihalar WHERE lower(code) = lower(?)",
       code,
-    ) !== undefined
+    )) !== undefined
   );
 }

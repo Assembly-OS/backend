@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { all, get, now, run } from "@/lib/db";
+import { all, insert, now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { str } from "@/lib/validate";
@@ -34,29 +34,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "NO_MEMBERS" }, { status: 400 });
 
   const marks = others.map(() => "?").join(",");
-  const valid = all<{ id: number }>(
-    `SELECT id FROM users WHERE is_active = 1 AND id IN (${marks})`,
-    ...others,
+  const valid = (
+    await all<{ id: number }>(
+      `SELECT id FROM users WHERE is_active = 1 AND id IN (${marks})`,
+      ...others,
+    )
   ).map((row) => row.id);
   if (valid.length === 0)
     return NextResponse.json({ error: "NO_MEMBERS" }, { status: 400 });
 
   const stamp = now();
-  run(
+  // RETURNING, not a follow-up "newest row by this creator": that read is only
+  // right while one process writes, and two people starting a group at the same
+  // moment would otherwise both be handed the same id.
+  const groupId = await insert(
     "INSERT INTO chat_groups (title, created_by, created_at) VALUES (?,?,?)",
     title,
     user.id,
     stamp,
   );
-  const group = get<{ id: number }>(
-    "SELECT id FROM chat_groups WHERE created_by = ? ORDER BY id DESC LIMIT 1",
-    user.id,
-  )!;
 
   for (const memberId of [user.id, ...valid]) {
-    run(
-      "INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at) VALUES (?,?,?)",
-      group.id,
+    await run(
+      `INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?,?,?)
+       ON CONFLICT DO NOTHING`,
+      groupId,
       memberId,
       stamp,
     );
@@ -65,5 +67,5 @@ export async function POST(request: Request) {
   // Every member's chat rail should show the new group at once.
   publish(user.id, ...valid);
 
-  return NextResponse.json({ ok: true, id: group.id });
+  return NextResponse.json({ ok: true, id: groupId });
 }

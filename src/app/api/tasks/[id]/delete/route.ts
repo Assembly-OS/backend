@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, run } from "@/lib/db";
+import { get, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { id as parseId } from "@/lib/validate";
@@ -28,7 +28,7 @@ export async function POST(
   const taskId = parseId((await params).id);
   if (!taskId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const task = get<{
+  const task = await get<{
     id: number;
     from_user_id: number;
     to_user_id: number;
@@ -43,12 +43,12 @@ export async function POST(
 
   // The notification goes with it: a bell that opens a task which no longer
   // exists is worse than no bell at all.
-  run("DELETE FROM notifications WHERE entity = 'task' AND entity_id = ?", taskId);
-  run("DELETE FROM task_events WHERE task_id = ?", taskId);
+  await run("DELETE FROM notifications WHERE entity = 'task' AND entity_id = ?", taskId);
+  await run("DELETE FROM task_events WHERE task_id = ?", taskId);
   // The agreement it may have been raised from survives — the commitment was
   // real even if the assignment carrying it was a misfire.
-  run("UPDATE agreements SET task_id = NULL WHERE task_id = ?", taskId);
-  run("DELETE FROM tasks WHERE id = ?", taskId);
+  await run("UPDATE agreements SET task_id = NULL WHERE task_id = ?", taskId);
+  await run("DELETE FROM tasks WHERE id = ?", taskId);
 
   publish(task.from_user_id, task.to_user_id);
   return NextResponse.json({ ok: true });

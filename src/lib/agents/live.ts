@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { all, now, run } from "@/lib/db";
+import { all, now, run } from "@/lib/pg";
 import { isConfigured } from "./claude";
 import type { Candidate } from "./intake";
 
@@ -141,8 +141,8 @@ function roster(candidates: Candidate[]): string {
  * Nothing on this screen creates anything — the strict check still stands
  * where it matters, at the end, and again when the task is written.
  */
-export function roomRoster(): Candidate[] {
-  return all<Candidate>(
+export async function roomRoster(): Promise<Candidate[]> {
+  return await all<Candidate>(
     `SELECT login, full_name, role, department, position
        FROM users WHERE is_active = 1 ORDER BY role, full_name`,
   );
@@ -163,8 +163,8 @@ export interface MemoryFact {
  * a long list would cost more than it is worth and would bury the ones that
  * still matter under the ones that no longer do.
  */
-export function recallMemory(limit = 20): MemoryFact[] {
-  return all<MemoryFact>(
+export async function recallMemory(limit = 20): Promise<MemoryFact[]> {
+  return await all<MemoryFact>(
     "SELECT subject, fact, kind FROM meeting_memory ORDER BY id DESC LIMIT ?",
     limit,
   );
@@ -179,16 +179,16 @@ export function memoryBlock(facts: MemoryFact[]): string {
 }
 
 /** Writes what this meeting should be remembered for. */
-export function rememberFacts(
+export async function rememberFacts(
   meetingId: number | null,
   facts: MemoryFact[],
-): number {
+): Promise<number> {
   let written = 0;
   for (const item of facts.slice(0, 12)) {
     const subject = item.subject?.trim().slice(0, 120);
     const fact = item.fact?.trim().slice(0, 400);
     if (!subject || !fact) continue;
-    run(
+    await run(
       `INSERT INTO meeting_memory (meeting_id, subject, fact, kind, created_at)
        VALUES (?,?,?,?,?)`,
       meetingId,

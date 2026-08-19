@@ -26,7 +26,7 @@ export async function GET(
   const messageId = parseId((await params).id);
   if (!messageId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const row = attachment(messageId);
+  const row = await attachment(messageId);
   if (!row?.file_key)
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
@@ -36,7 +36,7 @@ export async function GET(
   // compare against.
   if (user) {
     const allowed = row.group_id
-      ? isGroupMember(row.group_id, user.id)
+      ? await isGroupMember(row.group_id, user.id)
       : row.from_user_id === user.id || row.to_user_id === user.id;
     if (!allowed)
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });

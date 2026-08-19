@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, now, run } from "@/lib/db";
+import { get, insert, now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { notifyBot } from "@/lib/notify-bot";
@@ -20,22 +20,31 @@ export async function POST(request: Request) {
   }
 
   // The assignment graph is enforced server-side, not just hidden in the form.
-  if (!assignableUsers(user).some((candidate) => candidate.id === toUserId)) {
+  if (
+    !(await assignableUsers(user)).some((candidate) => candidate.id === toUserId)
+  ) {
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
   }
 
-  const assignee = get<User>("SELECT * FROM users WHERE id = ?", toUserId)!;
+  const assignee = (await get<User>(
+    "SELECT * FROM users WHERE id = ?",
+    toUserId,
+  ))!;
   const priority = oneOf(body.priority, PRIORITIES, "ORTA");
   const description = str(body.description, 4000);
   const deadline = str(body.deadline, 20);
   const loyihaId = body.loyihaId == null ? null : id(body.loyihaId);
 
   const seq =
-    Number(get<{ c: number }>("SELECT COUNT(*) AS c FROM tasks")?.c ?? 0) + 1;
+    Number(
+      (await get<{ c: number }>("SELECT COUNT(*) AS c FROM tasks"))?.c ?? 0,
+    ) + 1;
   const code = `T-${String(seq).padStart(4, "0")}`;
   const stamp = now();
 
-  run(
+  // RETURNING, not a read-back by code: `code` comes from a row count, so two
+  // concurrent creates can share one, and the read-back could then find either.
+  const taskId = await insert(
     `INSERT INTO tasks (code, title, description, from_user_id, to_user_id, to_department,
                         priority, status, deadline, loyiha_id, uyushma_id, created_at)
      VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,?)`,
@@ -52,10 +61,7 @@ export async function POST(request: Request) {
     stamp,
   );
 
-  const taskId = Number(
-    get<{ id: number }>("SELECT id FROM tasks WHERE code = ?", code)!.id,
-  );
-  run(
+  await run(
     "INSERT INTO task_events (task_id, user_id, action, comment, created_at) VALUES (?,?,'YARATILDI',NULL,?)",
     taskId,
     user.id,

@@ -7,7 +7,7 @@ export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
-  return NextResponse.json(pulse(user), {
+  return NextResponse.json(await pulse(user), {
     headers: { "Cache-Control": "no-store" },
   });
 }

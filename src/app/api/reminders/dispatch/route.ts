@@ -12,5 +12,5 @@ export async function POST(request: Request) {
   if (secret && request.headers.get("X-Notify-Secret") !== secret) {
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
   }
-  return NextResponse.json({ fired: sweepReminders() });
+  return NextResponse.json({ fired: await sweepReminders() });
 }

@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS users (
   lang          TEXT NOT NULL DEFAULT 'uz',
   is_active     INTEGER NOT NULL DEFAULT 1,
   last_seen     TEXT,
-  telegram_id   INTEGER,
+  -- BIGINT, не INTEGER: в SQLite INTEGER 64-битный, а Telegram выдаёт
+  -- идентификаторы больше 2^31 с 2021 года — в int4 они не помещаются и
+  -- переносятся ошибкой «out of range», останавливая весь перенос.
+  telegram_id   BIGINT,
   created_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
@@ -54,11 +57,19 @@ CREATE TABLE IF NOT EXISTS loyihalar (
   name       TEXT NOT NULL,
   status     TEXT NOT NULL DEFAULT 'FAOL',
   progress   INTEGER NOT NULL DEFAULT 0,
-  budget     REAL NOT NULL DEFAULT 0,
+  -- DOUBLE PRECISION, а не REAL: REAL в Postgres — четыре байта, точных
+  -- цифр в нём около семи. Бюджет в сумах это число больше, и REAL округлил
+  -- бы его молча, при переносе и в каждом SUM(budget) после.
+  budget     DOUBLE PRECISION NOT NULL DEFAULT 0,
   owner_id   INTEGER,
   uyushma_id INTEGER,
   deadline   TEXT,
-  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  -- Added after the first release: the public site's blurb and the number
+  -- it lists each project under, so the panel and assembly.uz can be read
+  -- side by side.
+  description TEXT,
+  site_no     INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -145,9 +156,11 @@ CREATE INDEX IF NOT EXISTS idx_tasks_to    ON tasks(to_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_from  ON tasks(from_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_msg_pair    ON messages(from_user_id, to_user_id, id);
 CREATE INDEX IF NOT EXISTS idx_gm_user     ON group_members(user_id, group_id);
--- idx_msg_group lives in db.ts: on a database created before group chats this
--- file still runs against a `messages` table that has no group_id yet, and the
--- index has to wait until the migration there has added the column.
+-- В SQLite этот индекс жил в db.ts: там схема выполнялась против таблицы,
+-- в которой group_id ещё не было, и индекс ждал миграцию. Здесь group_id
+-- объявлен в CREATE TABLE выше, ждать нечего — а db.ts после переезда не
+-- останется, и без этой строки индекса не будет вовсе.
+CREATE INDEX IF NOT EXISTS idx_msg_group   ON messages(group_id, id);
 CREATE INDEX IF NOT EXISTS idx_events_task ON task_events(task_id, id);
 
 -- ------------------------------------------------------------------
@@ -175,7 +188,12 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   tokens_out  INTEGER NOT NULL DEFAULT 0,
   duration_ms INTEGER NOT NULL DEFAULT 0,
   used_model  TEXT,
-  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  -- Who submitted the material, and what it was, once runs stopped being
+  -- anonymous.
+  owner_user_id INTEGER,
+  source_kind   TEXT,
+  source_ref    TEXT
 );
 
 -- What the agent proposes to do. Nothing here has happened yet: an action
@@ -204,7 +222,9 @@ CREATE TABLE IF NOT EXISTS agent_proposals (
   -- assignee's department. The submitter is the fallback when the department
   -- has no head — a proposal nobody owns is a proposal nobody acts on.
   reviewer_user_id INTEGER REFERENCES users(id),
-  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  -- The reviewer, once proposals started being approved by a person.
+  owner_user_id INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_at   ON agent_runs(id DESC);
@@ -224,7 +244,17 @@ CREATE TABLE IF NOT EXISTS meetings (
   transcript   TEXT NOT NULL,
   -- Recognition language: 'uz-UZ' | 'ru-RU' | 'en-US'.
   lang         TEXT NOT NULL DEFAULT 'uz-UZ',
-  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  -- Meetings became CRM records as well as recordings: who was there, where
+  -- it happened, and what was agreed to do next.
+  company_id     INTEGER,
+  held_at        TEXT,
+  place          TEXT,
+  participants   TEXT,
+  responsible_id INTEGER,
+  description    TEXT,
+  next_steps     TEXT,
+  updated_at     TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_meetings_owner ON meetings(owner_id, id DESC);
@@ -310,7 +340,30 @@ CREATE TABLE IF NOT EXISTS partners (
   name        TEXT NOT NULL UNIQUE,
   sector      TEXT,
   first_seen  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
-  last_seen   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+  last_seen   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  -- The CRM grew onto this table after it was first written as a bare
+  -- directory of names. Everything below arrived by migration, and the
+  -- queries in lib/crm.ts read every one of them.
+  description     TEXT,
+  industry        TEXT,
+  direction       TEXT,
+  services        TEXT,
+  country         TEXT,
+  city            TEXT,
+  address         TEXT,
+  website         TEXT,
+  email           TEXT,
+  phone           TEXT,
+  head_name       TEXT,
+  head_position   TEXT,
+  status          TEXT NOT NULL DEFAULT 'POTENTIAL',
+  started_at      TEXT,
+  last_contact_at TEXT,
+  next_contact_at TEXT,
+  notes           TEXT,
+  owner_user_id   INTEGER,
+  created_at      TEXT,
+  updated_at      TEXT
 );
 
 -- What was said about a company in one meeting, in all three languages.
@@ -485,6 +538,12 @@ CREATE INDEX IF NOT EXISTS idx_assistant_msgs ON assistant_messages(user_id, id)
 -- на колонке, здесь — индекс. Без него «Rais» и «rais» стали бы двумя людьми.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_ci ON users (lower(login));
 
+-- То же для названия компании: в SQLite это делал COLLATE NOCASE на колонке.
+-- Без индекса «Uzum» и «UZUM» становятся двумя компаниями — тем более что
+-- lib/agents/partners.ts ищет по lower(name) и вставляет, если не нашёл,
+-- а с несколькими писателями это уже гонка.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_partners_name_ci ON partners (lower(name));
+
 -- Колонки, добавленные миграциями поверх исходной схемы.
 -- Собраны сравнением с рабочей базой, а не по истории правок:
 -- база — источник истины о том, что в ней на самом деле есть.
@@ -514,7 +573,7 @@ ALTER TABLE partners ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS head_name TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS head_position TEXT;
-ALTER TABLE partners ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'POTENTIAL';
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'POTENTIAL';
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS started_at TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS last_contact_at TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS next_contact_at TEXT;

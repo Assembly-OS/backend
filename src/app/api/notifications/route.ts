@@ -20,10 +20,10 @@ export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
-  sweepReminders();
+  await sweepReminders();
   return NextResponse.json({
-    unread: unreadCount(user.id),
-    notifications: listNotifications(user.id),
+    unread: await unreadCount(user.id),
+    notifications: await listNotifications(user.id),
   });
 }
 
@@ -33,6 +33,6 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
   const body = (await request.json().catch(() => ({}))) as { id?: unknown };
-  markRead(user.id, parseId(body.id) ?? undefined);
-  return NextResponse.json({ ok: true, unread: unreadCount(user.id) });
+  await markRead(user.id, parseId(body.id) ?? undefined);
+  return NextResponse.json({ ok: true, unread: await unreadCount(user.id) });
 }

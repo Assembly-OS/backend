@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { assertAuthSecret } from "@/lib/auth";
-import { get } from "@/lib/db";
+import { get } from "@/lib/pg";
 
 export const dynamic = "force-dynamic";
 
-export function GET() {
+export async function GET() {
   try {
     assertAuthSecret();
-    const result = get<{ ok: number }>("SELECT 1 AS ok");
+    const result = await get<{ ok: number }>("SELECT 1 AS ok");
     if (result?.ok !== 1) throw new Error("database check failed");
     return NextResponse.json(
       { ok: true },

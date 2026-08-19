@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, run } from "@/lib/db";
+import { insert, now } from "@/lib/pg";
 import { hasAdminSession } from "@/lib/admin-auth";
 import { codeTaken, PROJECT_CODE_PATTERN, projectFields } from "@/lib/projects";
 
@@ -13,20 +13,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
   const body = (await request.json()) as Record<string, unknown>;
-  const fields = projectFields(body);
+  const fields = await projectFields(body);
 
   if (!fields.code || !fields.name)
     return NextResponse.json({ error: "REQUIRED" }, { status: 400 });
   if (!PROJECT_CODE_PATTERN.test(fields.code))
     return NextResponse.json({ error: "BAD_CODE" }, { status: 400 });
-  if (codeTaken(fields.code))
+  if (await codeTaken(fields.code))
     return NextResponse.json({ error: "CODE_TAKEN" }, { status: 409 });
 
-  run(
+  // RETURNING id rather than reading the row back by code: nothing in the
+  // schema makes `code` unique, so a concurrent insert of the same code could
+  // hand the caller somebody else's project.
+  const id = await insert(
     `INSERT INTO loyihalar
        (code, name, description, status, progress, budget,
         owner_id, uyushma_id, deadline, site_no, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
     fields.code,
     fields.name,
     fields.description,
@@ -37,12 +40,8 @@ export async function POST(request: Request) {
     null,
     fields.deadline,
     fields.siteNo,
+    now(),
   );
 
-  const created = get<{ id: number }>(
-    "SELECT id FROM loyihalar WHERE code = ?",
-    fields.code,
-  )!;
-
-  return NextResponse.json({ ok: true, id: created.id, code: fields.code });
+  return NextResponse.json({ ok: true, id, code: fields.code });
 }

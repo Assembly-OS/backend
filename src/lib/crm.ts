@@ -1,4 +1,4 @@
-import { all, get, now, run } from "./db";
+import { all, get, insert, now, run } from "./pg";
 import { notify } from "./notifications";
 
 /**
@@ -117,10 +117,10 @@ export interface CompanyRow extends Company {
 }
 
 /** The list view: every company with the counts that make the row useful. */
-export function companies(filter?: {
+export async function companies(filter?: {
   status?: string;
   query?: string;
-}): CompanyRow[] {
+}): Promise<CompanyRow[]> {
   const where: string[] = [];
   const params: (string | number)[] = [];
 
@@ -132,15 +132,15 @@ export function companies(filter?: {
     // Cast a wide net: a person searching "logistics" means the industry or
     // the services text just as often as the name.
     where.push(
-      `(p.name LIKE ? COLLATE NOCASE OR p.industry LIKE ? COLLATE NOCASE
-        OR p.services LIKE ? COLLATE NOCASE OR p.city LIKE ? COLLATE NOCASE
-        OR p.head_name LIKE ? COLLATE NOCASE)`,
+      `(p.name ILIKE ? OR p.industry ILIKE ?
+        OR p.services ILIKE ? OR p.city ILIKE ?
+        OR p.head_name ILIKE ?)`,
     );
     const like = `%${filter.query}%`;
     params.push(like, like, like, like, like);
   }
 
-  return all<CompanyRow>(
+  return await all<CompanyRow>(
     `SELECT p.*,
             u.full_name AS owner_name,
             (SELECT COUNT(*) FROM meetings m WHERE m.company_id = p.id) AS meetings,
@@ -157,8 +157,10 @@ export function companies(filter?: {
   );
 }
 
-export function companyById(id: number): CompanyRow | undefined {
-  return companies().find((company) => company.id === id);
+export async function companyById(
+  id: number,
+): Promise<CompanyRow | undefined> {
+  return (await companies()).find((company) => company.id === id);
 }
 
 const COMPANY_FIELDS = [
@@ -186,9 +188,12 @@ export type CompanyInput = Partial<
   Record<(typeof COMPANY_FIELDS)[number], string | number | null>
 > & { name: string };
 
-export function createCompany(input: CompanyInput): number {
+export async function createCompany(input: CompanyInput): Promise<number> {
   const columns = COMPANY_FIELDS.filter((key) => input[key] !== undefined);
-  run(
+  // RETURNING, not `SELECT MAX(id)`: the old pair was only correct while a
+  // single process wrote to a single file, which is exactly what moving to a
+  // server ends.
+  return await insert(
     `INSERT INTO partners (${columns.join(",")}, first_seen, last_seen, created_at, updated_at)
      VALUES (${columns.map(() => "?").join(",")},?,?,?,?)`,
     ...columns.map((key) => input[key] ?? null),
@@ -197,13 +202,15 @@ export function createCompany(input: CompanyInput): number {
     now(),
     now(),
   );
-  return Number(get<{ id: number }>("SELECT MAX(id) AS id FROM partners")!.id);
 }
 
-export function updateCompany(id: number, input: CompanyInput): void {
+export async function updateCompany(
+  id: number,
+  input: CompanyInput,
+): Promise<void> {
   const columns = COMPANY_FIELDS.filter((key) => input[key] !== undefined);
   if (columns.length === 0) return;
-  run(
+  await run(
     `UPDATE partners SET ${columns.map((c) => `${c} = ?`).join(", ")}, updated_at = ?
       WHERE id = ?`,
     ...columns.map((key) => input[key] ?? null),
@@ -213,8 +220,8 @@ export function updateCompany(id: number, input: CompanyInput): void {
 }
 
 /** Called whenever a meeting is filed, so the card's dates stay honest. */
-export function touchCompany(id: number, when: string): void {
-  run(
+export async function touchCompany(id: number, when: string): Promise<void> {
+  await run(
     `UPDATE partners
         SET last_contact_at = CASE
               WHEN last_contact_at IS NULL OR last_contact_at < ? THEN ? ELSE last_contact_at END,
@@ -245,8 +252,8 @@ export interface Contact {
   note: string | null;
 }
 
-export function contactsOf(companyId: number): Contact[] {
-  return all<Contact>(
+export async function contactsOf(companyId: number): Promise<Contact[]> {
+  return await all<Contact>(
     "SELECT * FROM contacts WHERE company_id = ? ORDER BY is_head DESC, id",
     companyId,
   );
@@ -264,13 +271,16 @@ export interface ContactInput {
   note?: string | null;
 }
 
-export function createContact(input: ContactInput): number {
+export async function createContact(input: ContactInput): Promise<number> {
   // One head per company: promoting a new one demotes the old, rather than
   // leaving two people both labelled as the person in charge.
   if (input.is_head) {
-    run("UPDATE contacts SET is_head = 0 WHERE company_id = ?", input.company_id);
+    await run(
+      "UPDATE contacts SET is_head = 0 WHERE company_id = ?",
+      input.company_id,
+    );
   }
-  run(
+  const id = await insert(
     `INSERT INTO contacts
        (company_id, first_name, last_name, position, phone, email, telegram,
         is_head, note, created_at, updated_at)
@@ -287,11 +297,10 @@ export function createContact(input: ContactInput): number {
     now(),
     now(),
   );
-  const id = Number(get<{ id: number }>("SELECT MAX(id) AS id FROM contacts")!.id);
 
   // The card shows a head; keep it in step with the contact marked as one.
   if (input.is_head) {
-    run(
+    await run(
       "UPDATE partners SET head_name = ?, head_position = ?, updated_at = ? WHERE id = ?",
       `${input.first_name} ${input.last_name ?? ""}`.trim(),
       input.position ?? null,
@@ -302,8 +311,8 @@ export function createContact(input: ContactInput): number {
   return id;
 }
 
-export function deleteContact(id: number): void {
-  run("DELETE FROM contacts WHERE id = ?", id);
+export async function deleteContact(id: number): Promise<void> {
+  await run("DELETE FROM contacts WHERE id = ?", id);
 }
 
 /* ------------------------------------------------------------------ */
@@ -338,15 +347,19 @@ const AGREEMENT_SELECT = `
     LEFT JOIN meetings m ON m.id = a.meeting_id
     LEFT JOIN users u ON u.id = a.owner_user_id`;
 
-export function agreementsOf(companyId: number): AgreementRow[] {
-  return all<AgreementRow>(
+export async function agreementsOf(
+  companyId: number,
+): Promise<AgreementRow[]> {
+  return await all<AgreementRow>(
     `${AGREEMENT_SELECT} WHERE a.company_id = ? ORDER BY a.id DESC`,
     companyId,
   );
 }
 
-export function agreementById(id: number): AgreementRow | undefined {
-  return get<AgreementRow>(`${AGREEMENT_SELECT} WHERE a.id = ?`, id);
+export async function agreementById(
+  id: number,
+): Promise<AgreementRow | undefined> {
+  return await get<AgreementRow>(`${AGREEMENT_SELECT} WHERE a.id = ?`, id);
 }
 
 /**
@@ -355,16 +368,16 @@ export function agreementById(id: number): AgreementRow | undefined {
  * `mine` narrows to one person's own commitments — an employee opening the
  * page should see their week, not the Assembly's.
  */
-export function agreementBoard(mine?: number): {
+export async function agreementBoard(mine?: number): Promise<{
   overdue: AgreementRow[];
   todayList: AgreementRow[];
   soon: AgreementRow[];
   later: AgreementRow[];
   noDeadline: AgreementRow[];
-} {
+}> {
   const scope = mine ? " AND a.owner_user_id = ?" : "";
   const params = mine ? [mine] : [];
-  const open = all<AgreementRow>(
+  const open = await all<AgreementRow>(
     `${AGREEMENT_SELECT}
       WHERE a.status IN ('NEW','IN_PROGRESS')${scope}
       ORDER BY a.deadline IS NULL, a.deadline, a.id DESC`,
@@ -396,8 +409,9 @@ export interface AgreementInput {
   created_by?: number | null;
 }
 
-export function createAgreement(input: AgreementInput): number {
-  run(
+export async function createAgreement(input: AgreementInput): Promise<number> {
+  // RETURNING, not `SELECT MAX(id)` — see createCompany.
+  const id = await insert(
     `INSERT INTO agreements
        (company_id, meeting_id, description, owner_user_id, owner_name,
         deadline, status, priority, note, source, created_by, created_at)
@@ -415,11 +429,10 @@ export function createAgreement(input: AgreementInput): number {
     input.created_by ?? null,
     now(),
   );
-  const id = Number(get<{ id: number }>("SELECT MAX(id) AS id FROM agreements")!.id);
 
   if (input.owner_user_id) {
     // Told now that it is theirs; reminded again as the date approaches.
-    notify({
+    await notify({
       userId: input.owner_user_id,
       kind: "agreement",
       title: input.description.slice(0, 120),
@@ -431,14 +444,22 @@ export function createAgreement(input: AgreementInput): number {
     // A commitment with a date gets its reminder immediately — the whole point
     // of recording it is that somebody is told in time.
     if (input.deadline) {
-      scheduleReminder(id, input.owner_user_id, input.deadline, input.description);
+      await scheduleReminder(
+        id,
+        input.owner_user_id,
+        input.deadline,
+        input.description,
+      );
     }
   }
   return id;
 }
 
-export function setAgreementStatus(id: number, status: string): void {
-  run(
+export async function setAgreementStatus(
+  id: number,
+  status: string,
+): Promise<void> {
+  await run(
     `UPDATE agreements SET status = ?, done_at = ? WHERE id = ?`,
     status,
     status === "DONE" ? now() : null,
@@ -446,7 +467,7 @@ export function setAgreementStatus(id: number, status: string): void {
   );
   // A settled agreement stops nagging.
   if (status === "DONE" || status === "CANCELLED") {
-    run(
+    await run(
       "UPDATE reminders SET status = 'DISMISSED' WHERE agreement_id = ? AND status = 'PENDING'",
       id,
     );
@@ -474,12 +495,12 @@ export interface ReminderRow {
  * Two reminders per deadline: one the day before, one on the day. Earlier than
  * that is noise a week out; later than that is too late to act.
  */
-export function scheduleReminder(
+export async function scheduleReminder(
   agreementId: number,
   userId: number,
   deadline: string,
   message: string,
-): void {
+): Promise<void> {
   const day = today();
   for (const [when, kind] of [
     [addDays(deadline, -1), "followup"],
@@ -488,7 +509,7 @@ export function scheduleReminder(
     // Never schedule into the past — a deadline set for yesterday should show
     // up as overdue, not fire a reminder that was already missed.
     if (when < day) continue;
-    run(
+    await run(
       `INSERT INTO reminders (agreement_id, user_id, remind_at, kind, status, message, created_at)
        VALUES (?,?,?,?,'PENDING',?,?)`,
       agreementId,
@@ -502,8 +523,8 @@ export function scheduleReminder(
 }
 
 /** Everything due to be shown to this person now or earlier. */
-export function dueReminders(userId: number): ReminderRow[] {
-  return all<ReminderRow>(
+export async function dueReminders(userId: number): Promise<ReminderRow[]> {
+  return await all<ReminderRow>(
     `SELECT r.*, a.description, a.deadline, p.name AS company_name
        FROM reminders r
        LEFT JOIN agreements a ON a.id = r.agreement_id
@@ -515,8 +536,11 @@ export function dueReminders(userId: number): ReminderRow[] {
   );
 }
 
-export function dismissReminder(id: number, userId: number): void {
-  run(
+export async function dismissReminder(
+  id: number,
+  userId: number,
+): Promise<void> {
+  await run(
     "UPDATE reminders SET status = 'DISMISSED', sent_at = ? WHERE id = ? AND user_id = ?",
     now(),
     id,
@@ -551,8 +575,11 @@ export interface MeetingRow {
   decisions: string | null;
 }
 
-export function meetingsOf(companyId: number, lang = "uz"): MeetingRow[] {
-  return all<MeetingRow>(
+export async function meetingsOf(
+  companyId: number,
+  lang = "uz",
+): Promise<MeetingRow[]> {
+  return await all<MeetingRow>(
     `SELECT m.*, p.name AS company_name, u.full_name AS responsible_name,
             c.summary, c.key_points, c.decisions
        FROM meetings m
@@ -566,8 +593,11 @@ export function meetingsOf(companyId: number, lang = "uz"): MeetingRow[] {
   );
 }
 
-export function recentMeetings(lang = "uz", limit = 50): MeetingRow[] {
-  return all<MeetingRow>(
+export async function recentMeetings(
+  lang = "uz",
+  limit = 50,
+): Promise<MeetingRow[]> {
+  return await all<MeetingRow>(
     `SELECT m.*, p.name AS company_name, u.full_name AS responsible_name,
             c.summary, c.key_points, c.decisions
        FROM meetings m
@@ -595,38 +625,40 @@ export interface CrmTotals {
   overdue: number;
 }
 
-export function crmTotals(): CrmTotals {
+export async function crmTotals(): Promise<CrmTotals> {
   const day = today();
   const monthStart = `${day.slice(0, 7)}-01`;
   const horizon = addDays(day, 7);
-  const one = (sql: string, ...params: (string | number)[]) =>
-    Number(get<{ n: number }>(sql, ...params)?.n ?? 0);
+  const one = async (sql: string, ...params: (string | number)[]) =>
+    Number((await get<{ n: number }>(sql, ...params))?.n ?? 0);
 
   return {
-    companies: one("SELECT COUNT(*) AS n FROM partners"),
-    active: one("SELECT COUNT(*) AS n FROM partners WHERE status = 'ACTIVE'"),
-    newThisMonth: one(
+    companies: await one("SELECT COUNT(*) AS n FROM partners"),
+    active: await one(
+      "SELECT COUNT(*) AS n FROM partners WHERE status = 'ACTIVE'",
+    ),
+    newThisMonth: await one(
       "SELECT COUNT(*) AS n FROM partners WHERE COALESCE(created_at, first_seen) >= ?",
       monthStart,
     ),
-    meetingsThisMonth: one(
+    meetingsThisMonth: await one(
       "SELECT COUNT(*) AS n FROM meetings WHERE COALESCE(held_at, created_at) >= ?",
       monthStart,
     ),
-    openAgreements: one(
+    openAgreements: await one(
       "SELECT COUNT(*) AS n FROM agreements WHERE status IN ('NEW','IN_PROGRESS')",
     ),
-    dueToday: one(
+    dueToday: await one(
       "SELECT COUNT(*) AS n FROM agreements WHERE status IN ('NEW','IN_PROGRESS') AND deadline = ?",
       day,
     ),
-    dueSoon: one(
+    dueSoon: await one(
       `SELECT COUNT(*) AS n FROM agreements
         WHERE status IN ('NEW','IN_PROGRESS') AND deadline > ? AND deadline <= ?`,
       day,
       horizon,
     ),
-    overdue: one(
+    overdue: await one(
       `SELECT COUNT(*) AS n FROM agreements
         WHERE status IN ('NEW','IN_PROGRESS') AND deadline IS NOT NULL AND deadline < ?`,
       day,
@@ -653,16 +685,16 @@ export interface SearchHit {
  * own idea of what "matching" means, and the result is grouped by kind for the
  * reader anyway.
  */
-export function search(query: string, limit = 6): SearchHit[] {
+export async function search(query: string, limit = 6): Promise<SearchHit[]> {
   const term = query.trim();
   if (term.length < 2) return [];
   const like = `%${term}%`;
   const hits: SearchHit[] = [];
 
-  for (const row of all<{ id: number; name: string; industry: string | null; city: string | null }>(
+  for (const row of await all<{ id: number; name: string; industry: string | null; city: string | null }>(
     `SELECT id, name, industry, city FROM partners
-      WHERE name LIKE ? COLLATE NOCASE OR industry LIKE ? COLLATE NOCASE
-         OR services LIKE ? COLLATE NOCASE
+      WHERE name ILIKE ? OR industry ILIKE ?
+         OR services ILIKE ?
       ORDER BY name LIMIT ?`,
     like, like, like, limit,
   )) {
@@ -675,11 +707,11 @@ export function search(query: string, limit = 6): SearchHit[] {
     });
   }
 
-  for (const row of all<{ id: number; company_id: number; first_name: string; last_name: string; position: string | null; company: string }>(
+  for (const row of await all<{ id: number; company_id: number; first_name: string; last_name: string; position: string | null; company: string }>(
     `SELECT c.id, c.company_id, c.first_name, c.last_name, c.position, p.name AS company
        FROM contacts c JOIN partners p ON p.id = c.company_id
-      WHERE c.first_name LIKE ? COLLATE NOCASE OR c.last_name LIKE ? COLLATE NOCASE
-         OR c.email LIKE ? COLLATE NOCASE OR c.phone LIKE ?
+      WHERE c.first_name ILIKE ? OR c.last_name ILIKE ?
+         OR c.email ILIKE ? OR c.phone LIKE ?
       LIMIT ?`,
     like, like, like, like, limit,
   )) {
@@ -692,10 +724,10 @@ export function search(query: string, limit = 6): SearchHit[] {
     });
   }
 
-  for (const row of all<{ id: number; title: string; held_at: string | null; created_at: string; company: string | null }>(
+  for (const row of await all<{ id: number; title: string; held_at: string | null; created_at: string; company: string | null }>(
     `SELECT m.id, m.title, m.held_at, m.created_at, p.name AS company
        FROM meetings m LEFT JOIN partners p ON p.id = m.company_id
-      WHERE m.title LIKE ? COLLATE NOCASE OR m.transcript LIKE ? COLLATE NOCASE
+      WHERE m.title ILIKE ? OR m.transcript ILIKE ?
       ORDER BY m.id DESC LIMIT ?`,
     like, like, limit,
   )) {
@@ -710,10 +742,10 @@ export function search(query: string, limit = 6): SearchHit[] {
     });
   }
 
-  for (const row of all<{ id: number; description: string; deadline: string | null; status: string; company: string | null; company_id: number | null }>(
+  for (const row of await all<{ id: number; description: string; deadline: string | null; status: string; company: string | null; company_id: number | null }>(
     `SELECT a.id, a.description, a.deadline, a.status, a.company_id, p.name AS company
        FROM agreements a LEFT JOIN partners p ON p.id = a.company_id
-      WHERE a.description LIKE ? COLLATE NOCASE
+      WHERE a.description ILIKE ?
       ORDER BY a.id DESC LIMIT ?`,
     like, limit,
   )) {
@@ -726,9 +758,9 @@ export function search(query: string, limit = 6): SearchHit[] {
     });
   }
 
-  for (const row of all<{ id: number; code: string; title: string; status: string }>(
+  for (const row of await all<{ id: number; code: string; title: string; status: string }>(
     `SELECT id, code, title, status FROM tasks
-      WHERE title LIKE ? COLLATE NOCASE OR code LIKE ? COLLATE NOCASE
+      WHERE title ILIKE ? OR code ILIKE ?
       ORDER BY id DESC LIMIT ?`,
     like, like, limit,
   )) {

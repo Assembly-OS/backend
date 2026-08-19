@@ -12,6 +12,6 @@ export async function POST(
   const reminderId = parseId((await params).id);
   if (!reminderId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
   // Scoped to the owner inside the query — one person cannot clear another's.
-  dismissReminder(reminderId, user.id);
+  await dismissReminder(reminderId, user.id);
   return NextResponse.json({ ok: true });
 }

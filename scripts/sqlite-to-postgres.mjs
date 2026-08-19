@@ -88,6 +88,51 @@ function exists(table) {
   );
 }
 
+/**
+ * Пары строк, которые в SQLite были разными, а в Postgres станут одной.
+ *
+ * Регистронезависимость логина и названия компании задана здесь уникальными
+ * индексами по lower(...), которых в SQLite не было: `users.login` был просто
+ * UNIQUE, а COLLATE NOCASE на `partners.name` сворачивал только ASCII — «Узум»
+ * и «УЗУМ» жили там как две компании. При переносе одна из пары молча уходит
+ * в ON CONFLICT DO NOTHING, а падает перенос через несколько таблиц, на
+ * внешнем ключе, который на настоящую причину не указывает.
+ *
+ * toLowerCase() в JS сворачивает Unicode так же, как lower() в Postgres,
+ * поэтому ищем столкновения тем же правилом, каким их найдёт целевая база.
+ */
+function caseCollisions(table, column) {
+  if (!exists(table)) return [];
+  const seen = new Map();
+  const clashes = [];
+  for (const row of source.prepare(`SELECT id, ${column} FROM ${table}`).all()) {
+    const key = String(row[column] ?? "").toLowerCase();
+    const first = seen.get(key);
+    if (first) clashes.push([table, column, first, row]);
+    else seen.set(key, row);
+  }
+  return clashes;
+}
+
+const collisions = [
+  ...caseCollisions("users", "login"),
+  ...caseCollisions("partners", "name"),
+];
+if (collisions.length > 0) {
+  console.error(
+    "Перенос не начат: эти значения в PostgreSQL уникальны без учёта регистра.\n" +
+      "Приведите каждую пару к одному виду или удалите лишнюю строку, затем\n" +
+      "запустите снова — иначе одна из них потеряется вместе со всем, что на\n" +
+      "неё ссылается.",
+  );
+  for (const [table, column, a, b] of collisions)
+    console.error(
+      `  ${table}.${column}: id ${a.id} «${a[column]}» и id ${b.id} «${b[column]}»`,
+    );
+  source.close();
+  process.exit(1);
+}
+
 await client.connect();
 
 try {
@@ -118,6 +163,13 @@ try {
       continue;
     }
 
+    // Колонка, которая есть в источнике и которой нет в целевой схеме, тихо
+    // выпадает из пересечения вместе со всем, что в ней записано. Молчать об
+    // этом нельзя: перенос выглядел бы успешным.
+    const dropped = theirs.filter((c) => !ours.includes(c));
+    if (dropped.length > 0)
+      console.warn(`  ! ${table}: нет в целевой схеме — ${dropped.join(", ")}`);
+
     const rows = source.prepare(`SELECT ${cols.join(", ")} FROM ${table}`).all();
     if (rows.length === 0) {
       report.push([table, "0"]);
@@ -136,13 +188,23 @@ try {
       ? insert.replace("VALUES", "OVERRIDING SYSTEM VALUE VALUES")
       : insert;
 
+    // Считаем вставленное, а не прочитанное: ON CONFLICT DO NOTHING проглотит
+    // строку, столкнувшуюся с уникальным индексом (в Postgres их больше, чем
+    // было в SQLite), и без этого счётчика потеря осталась бы незаметной.
+    let written = 0;
     for (const row of rows) {
-      await client.query(
+      const res = await client.query(
         withIds,
         cols.map((c) => (row[c] === undefined ? null : row[c])),
       );
+      written += res.rowCount;
     }
-    report.push([table, String(rows.length)]);
+    report.push([
+      table,
+      written === rows.length
+        ? String(rows.length)
+        : `${written} из ${rows.length} — ПРОПУЩЕНО ${rows.length - written}`,
+    ]);
   }
 
   // Счётчики идентификаторов сдвигаем за максимум, иначе первая же вставка
@@ -156,9 +218,12 @@ try {
       )
     ).rowCount;
     if (!has) continue;
+    // Третий аргумент false означает «это ещё не выданное значение»: тогда
+    // следующий nextval вернёт ровно MAX(id) + 1, а на пустой таблице — 1,
+    // без пропуска первого идентификатора.
     await client.query(
       `SELECT setval(pg_get_serial_sequence('${table}', 'id'),
-                     GREATEST((SELECT COALESCE(MAX(id), 0) FROM ${table}), 1))`,
+                     (SELECT COALESCE(MAX(id), 0) + 1 FROM ${table}), false)`,
     );
   }
 

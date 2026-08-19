@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { now, run } from "@/lib/db";
+import { now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { thread, userByLogin } from "@/lib/queries";
@@ -27,7 +27,7 @@ export async function POST(
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
-  const other = userByLogin(decodeURIComponent(login));
+  const other = await userByLogin(decodeURIComponent(login));
   if (!other) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
   if (other.id === user.id)
     return NextResponse.json({ error: "SELF" }, { status: 400 });
@@ -76,7 +76,7 @@ export async function POST(
   const name = safeName(blob.name ?? "", kind);
   const stored = store(bytes, kind, mime, name);
 
-  run(
+  await run(
     `INSERT INTO messages
        (from_user_id, to_user_id, body, kind, file_name, file_size, file_mime, file_key, duration, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -94,5 +94,5 @@ export async function POST(
 
   publish(user.id, other.id);
 
-  return NextResponse.json({ messages: thread(user.id, other.id) });
+  return NextResponse.json({ messages: await thread(user.id, other.id) });
 }

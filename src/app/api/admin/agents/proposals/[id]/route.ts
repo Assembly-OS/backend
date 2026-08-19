@@ -22,7 +22,7 @@ export async function POST(
   const body = (await request.json()) as { decision?: unknown };
   const decision = oneOf(body.decision, ["approve", "reject"] as const, "reject");
 
-  const outcome = decideProposal(proposalId, decision, ADMIN_LOGIN);
+  const outcome = await decideProposal(proposalId, decision, ADMIN_LOGIN);
   if (!outcome.ok)
     return NextResponse.json(
       { error: outcome.error },

@@ -11,7 +11,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   return NextResponse.json({
-    companies: companies({
+    companies: await companies({
       status: url.searchParams.get("status") ?? undefined,
       query: url.searchParams.get("q") ?? undefined,
     }),
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   const name = str(body.name, 160);
   if (!name) return NextResponse.json({ error: "NAME_REQUIRED" }, { status: 400 });
 
-  const id = createCompany({
+  const id = await createCompany({
     name,
     description: str(body.description, 2000),
     industry: str(body.industry, 120),

@@ -1,4 +1,4 @@
-import { now, run } from "./db";
+import { now, run } from "./pg";
 
 type Global = typeof globalThis & {
   __assambleyaOnline?: Map<number, number>;
@@ -51,8 +51,8 @@ export function clearPresence(): number {
 }
 
 /** Stamp the user's last activity as "now" and return that timestamp. */
-export function touchLastSeen(userId: number): string {
+export async function touchLastSeen(userId: number): Promise<string> {
   const stamp = now();
-  run("UPDATE users SET last_seen = ? WHERE id = ?", stamp, userId);
+  await run("UPDATE users SET last_seen = ? WHERE id = ?", stamp, userId);
   return stamp;
 }

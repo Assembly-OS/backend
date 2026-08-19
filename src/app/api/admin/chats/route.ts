@@ -18,12 +18,12 @@ export async function GET(request: Request) {
   // `?group=<id>` reads a group; `?a=&b=` reads a one-to-one thread.
   const groupId = parseId(params.get("group"));
   if (groupId)
-    return NextResponse.json({ messages: groupConversation(groupId) });
+    return NextResponse.json({ messages: await groupConversation(groupId) });
 
   const a = parseId(params.get("a"));
   const b = parseId(params.get("b"));
   if (!a || !b || a === b)
     return NextResponse.json({ error: "BAD_PAIR" }, { status: 400 });
 
-  return NextResponse.json({ messages: conversation(a, b) });
+  return NextResponse.json({ messages: await conversation(a, b) });
 }

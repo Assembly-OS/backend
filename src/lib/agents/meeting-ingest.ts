@@ -1,4 +1,4 @@
-import { get, now, run } from "../db";
+import { insert, now } from "../pg";
 import { resolvePath, safeName, store } from "../uploads";
 import { transcribeAudio, transcriptionAvailable } from "./transcribe";
 import { runMeetingIntake } from "./intake-runner";
@@ -81,7 +81,10 @@ export async function ingestMeeting(
 
   if (transcript.length < MIN_TRANSCRIPT) return "TRANSCRIPT_TOO_SHORT";
 
-  run(
+  // RETURNING rather than a following SELECT MAX(id): with the bot, the web
+  // app and the sweep all writing, the highest id need not be the row this
+  // call just inserted.
+  const meetingId = await insert(
     `INSERT INTO meetings (title, owner_id, audio_key, duration, transcript, lang, created_at)
      VALUES (?,?,?,?,?,?,?)`,
     input.title,
@@ -91,9 +94,6 @@ export async function ingestMeeting(
     transcript,
     input.lang,
     now(),
-  );
-  const meetingId = Number(
-    get<{ id: number }>("SELECT MAX(id) AS id FROM meetings")!.id,
   );
 
   const intake = await runMeetingIntake(

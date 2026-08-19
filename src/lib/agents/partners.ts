@@ -1,4 +1,4 @@
-import { all, get, now, run } from "@/lib/db";
+import { all, get, insert, now, run } from "@/lib/pg";
 import type { Trilingual } from "./intake";
 
 /**
@@ -40,16 +40,19 @@ export interface PartnerReport {
 const KINDS = new Set(["muhokama", "taklif", "ehtiyoj", "kelishuv", "xavf"]);
 
 /** Finds a company by name, creating it the first time it is mentioned. */
-function partnerId(name: string, sector?: string): number | null {
+async function partnerId(
+  name: string,
+  sector?: string,
+): Promise<number | null> {
   const clean = name.trim().slice(0, 160);
   if (clean.length < 2) return null;
 
-  const existing = get<{ id: number }>(
-    "SELECT id FROM partners WHERE name = ? COLLATE NOCASE",
+  const existing = await get<{ id: number }>(
+    "SELECT id FROM partners WHERE lower(name) = lower(?)",
     clean,
   );
   if (existing) {
-    run(
+    await run(
       `UPDATE partners SET last_seen = ?, sector = COALESCE(sector, ?) WHERE id = ?`,
       now(),
       sector?.trim().slice(0, 80) || null,
@@ -58,34 +61,34 @@ function partnerId(name: string, sector?: string): number | null {
     return existing.id;
   }
 
-  run(
+  // RETURNING gives the new id in the same round trip. Reading it back by name
+  // was a second query whose answer a concurrent writer could have changed.
+  return insert(
     "INSERT INTO partners (name, sector, first_seen, last_seen) VALUES (?,?,?,?)",
     clean,
     sector?.trim().slice(0, 80) || null,
     now(),
     now(),
   );
-  return get<{ id: number }>("SELECT id FROM partners WHERE name = ? COLLATE NOCASE", clean)
-    ?.id ?? null;
 }
 
 /** Files everything one meeting had to say about the companies in it. */
-export function recordPartners(
+export async function recordPartners(
   meetingId: number | null,
   reports: PartnerReport[],
-): { companies: number; ideas: number } {
+): Promise<{ companies: number; ideas: number }> {
   let companies = 0;
   let ideas = 0;
 
   // Bounded: a transcript that names thirty companies has misread something.
   for (const report of reports.slice(0, 12)) {
-    const id = partnerId(report.name, report.sector);
+    const id = await partnerId(report.name, report.sector);
     if (!id) continue;
     companies++;
 
     for (const note of (report.notes ?? []).slice(0, 8)) {
       if (!note.uz?.trim() && !note.ru?.trim()) continue;
-      run(
+      await run(
         `INSERT INTO partner_notes (partner_id, meeting_id, kind, uz, ru, en, created_at)
          VALUES (?,?,?,?,?,?,?)`,
         id,
@@ -102,8 +105,8 @@ export function recordPartners(
       if (!idea.proposal?.uz?.trim() && !idea.proposal?.ru?.trim()) continue;
       // The match is another company; naming it creates it too, so a
       // suggested introduction is a company we now track.
-      const matchId = idea.match ? partnerId(idea.match) : null;
-      run(
+      const matchId = idea.match ? await partnerId(idea.match) : null;
+      await run(
         `INSERT INTO partner_ideas
            (partner_id, meeting_id, match_id,
             proposal_uz, proposal_ru, proposal_en,
@@ -146,8 +149,8 @@ interface DigestRow {
  * are in — not to reproduce the archive, which would cost more than the
  * meeting being analysed.
  */
-export function partnerHistory(limit = 14): string {
-  const rows = all<DigestRow>(
+export async function partnerHistory(limit = 14): Promise<string> {
+  const rows = await all<DigestRow>(
     `SELECT p.name, p.sector, n.kind, n.uz AS text
        FROM partners p
        JOIN partner_notes n ON n.partner_id = p.id
@@ -183,8 +186,10 @@ export interface PartnerView {
 }
 
 /** Every company with its history and open suggestions, in one language. */
-export function partnersFor(lang: "uz" | "ru" | "en"): PartnerView[] {
-  const companies = all<{
+export async function partnersFor(
+  lang: "uz" | "ru" | "en",
+): Promise<PartnerView[]> {
+  const companies = await all<{
     id: number;
     name: string;
     sector: string | null;
@@ -193,7 +198,7 @@ export function partnersFor(lang: "uz" | "ru" | "en"): PartnerView[] {
 
   if (companies.length === 0) return [];
 
-  const notes = all<{
+  const notes = await all<{
     partner_id: number;
     kind: string;
     text: string;
@@ -201,7 +206,7 @@ export function partnersFor(lang: "uz" | "ru" | "en"): PartnerView[] {
   }>(`SELECT partner_id, kind, ${lang} AS text, created_at
         FROM partner_notes ORDER BY id DESC`);
 
-  const ideas = all<{
+  const ideas = await all<{
     id: number;
     partner_id: number;
     proposal: string;
@@ -225,10 +230,12 @@ export function partnersFor(lang: "uz" | "ru" | "en"): PartnerView[] {
 }
 
 /** Open suggestions across all companies — what the daily reminder carries. */
-export function openIdeas(
+export async function openIdeas(
   lang: "uz" | "ru" | "en",
   limit = 8,
-): { partner: string; proposal: string; why: string; match: string | null }[] {
+): Promise<
+  { partner: string; proposal: string; why: string; match: string | null }[]
+> {
   return all(
     `SELECT p.name AS partner,
             i.proposal_${lang} AS proposal, i.why_${lang} AS why,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, now, run } from "@/lib/db";
+import { get, insert, now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { runMeetingIntake } from "@/lib/agents/intake-runner";
 import { canSubmitToAi } from "@/lib/agents/access";
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
   const liveId = Number(form.get("live"));
   const live =
     Number.isInteger(liveId) && liveId > 0
-      ? get<{
+      ? await get<{
           id: number;
           owner_id: number;
           audio_key: string | null;
@@ -111,7 +111,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "TRANSCRIPT_TOO_SHORT" }, { status: 400 });
   }
 
-  run(
+  // RETURNING, not `SELECT MAX(id)`: with the bot and the web app writing to
+  // the same database, the highest id need not be the row just inserted.
+  const meetingId = await insert(
     `INSERT INTO meetings (title, owner_id, audio_key, duration, transcript, lang, created_at)
      VALUES (?,?,?,?,?,?,?)`,
     title,
@@ -122,14 +124,11 @@ export async function POST(request: Request) {
     lang,
     now(),
   );
-  const meetingId = Number(
-    get<{ id: number }>("SELECT MAX(id) AS id FROM meetings")!.id,
-  );
 
   // The live session has done its job; the meeting row owns the recording and
   // the transcript now. Leaving it would double-count the audio on disk.
   if (live) {
-    run("DELETE FROM meeting_live WHERE id = ?", live.id);
+    await run("DELETE FROM meeting_live WHERE id = ?", live.id);
   }
 
   const result = await runMeetingIntake(

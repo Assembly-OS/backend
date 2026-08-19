@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, run } from "@/lib/db";
+import { get, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { hashPassword, verifyPassword } from "@/lib/auth";
 
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "SHORT" }, { status: 400 });
   }
 
-  const row = get<{ password_hash: string }>(
+  const row = await get<{ password_hash: string }>(
     "SELECT password_hash FROM users WHERE id = ?",
     user.id,
   );
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "WRONG_PASSWORD" }, { status: 403 });
   }
 
-  run(
+  await run(
     "UPDATE users SET password_hash = ? WHERE id = ?",
     hashPassword(newPassword),
     user.id,

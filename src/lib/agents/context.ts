@@ -1,4 +1,4 @@
-import { all } from "@/lib/db";
+import { all, now } from "@/lib/pg";
 import type { DataScope } from "./registry";
 
 /**
@@ -86,26 +86,31 @@ export interface AgentContext {
   rows: number;
 }
 
-export function loadContext(scopes: DataScope[]): AgentContext {
+export async function loadContext(scopes: DataScope[]): Promise<AgentContext> {
   const context: AgentContext = { rows: 0 };
 
   if (scopes.includes("tasks")) {
-    context.tasks = all<TaskRow>(
+    // julianday() was SQLite's. Subtracting two timestamps in Postgres yields
+    // an interval whose day component truncates towards zero exactly as
+    // CAST(... AS INTEGER) did, so an overdue count never shifts by a day.
+    context.tasks = await all<TaskRow>(
       `SELECT t.id, t.code, t.title, t.status, t.priority, t.deadline, t.created_at,
               uf.full_name AS from_name, t.to_user_id AS to_id, ut.full_name AS to_name,
               CASE WHEN t.deadline IS NULL THEN NULL
-                   ELSE CAST(julianday('now') - julianday(t.deadline) AS INTEGER) END AS overdue_days
+                   ELSE EXTRACT(DAY FROM (?::timestamp - t.deadline::timestamp))::int
+              END AS overdue_days
          FROM tasks t
          JOIN users uf ON uf.id = t.from_user_id
          JOIN users ut ON ut.id = t.to_user_id
         ORDER BY t.id DESC LIMIT ?`,
+      now(),
       LIMIT,
     );
     context.rows += context.tasks.length;
   }
 
   if (scopes.includes("task_events")) {
-    context.task_events = all<EventRow>(
+    context.task_events = await all<EventRow>(
       `SELECT e.id, e.action, e.created_at, t.code, u.full_name AS actor
          FROM task_events e
          JOIN tasks t ON t.id = e.task_id
@@ -117,22 +122,25 @@ export function loadContext(scopes: DataScope[]): AgentContext {
   }
 
   if (scopes.includes("staff")) {
-    context.staff = all<StaffRow>(
+    context.staff = await all<StaffRow>(
       `SELECT u.id, u.login, u.full_name, u.role, u.department, u.last_seen,
               (SELECT COUNT(*) FROM tasks t WHERE t.to_user_id = u.id
                  AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS open_tasks,
               (SELECT COUNT(*) FROM tasks t WHERE t.to_user_id = u.id
-                 AND t.deadline IS NOT NULL AND t.deadline < date('now')
+                 AND t.deadline IS NOT NULL AND t.deadline < ?
                  AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue_tasks
          FROM users u WHERE u.is_active = 1
         ORDER BY u.full_name LIMIT ?`,
+      // Date only, as date('now') was: a deadline falling today is not late,
+      // and comparing it against a full timestamp would make it so.
+      now().slice(0, 10),
       LIMIT,
     );
     context.rows += context.staff.length;
   }
 
   if (scopes.includes("projects")) {
-    context.projects = all<ProjectRow>(
+    context.projects = await all<ProjectRow>(
       `SELECT id, code, name, status, progress, deadline, owner_id
          FROM loyihalar ORDER BY id LIMIT ?`,
       LIMIT,
@@ -141,7 +149,7 @@ export function loadContext(scopes: DataScope[]): AgentContext {
   }
 
   if (scopes.includes("associations")) {
-    context.associations = all<AssociationRow>(
+    context.associations = await all<AssociationRow>(
       `SELECT id, name, sector, members_count, head_user_id
          FROM uyushmalar ORDER BY id LIMIT ?`,
       LIMIT,
@@ -152,11 +160,13 @@ export function loadContext(scopes: DataScope[]): AgentContext {
   if (scopes.includes("messages")) {
     // Counts, never content. The Risk agent needs to know that traffic exists
     // and roughly when — it has no business reading what colleagues wrote.
-    const stat = all<MessageStat>(
-      `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN kind != 'text' THEN 1 ELSE 0 END) AS attachments,
-              MAX(created_at) AS last_at
-         FROM messages`,
+    const stat = (
+      await all<MessageStat>(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN kind != 'text' THEN 1 ELSE 0 END) AS attachments,
+                MAX(created_at) AS last_at
+           FROM messages`,
+      )
     )[0];
     context.messages = stat ?? { total: 0, attachments: 0, last_at: null };
     context.rows += 1;

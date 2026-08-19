@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 
 /**
  * PostgreSQL access layer.
@@ -24,6 +24,23 @@ import { Pool } from "pg";
 const CONNECTION =
   process.env.DATABASE_URL?.trim() ||
   "postgres://localhost:5432/assambleya";
+
+/**
+ * `bigint` arrives as a JavaScript number, not a string.
+ *
+ * `COUNT(*)` is bigint in Postgres, and node-postgres hands bigints back as
+ * strings because one can exceed `Number.MAX_SAFE_INTEGER`. None here can:
+ * every one of them counts rows in a single organisation's tables. What the
+ * default does instead is break silently — every counter in this codebase is
+ * typed `number`, TypeScript cannot see the difference, and `'0'` is truthy,
+ * so a guard like `totals.created ? … : 0` divides by a string zero and
+ * returns Infinity. Registered once, here, rather than wrapped in `Number()`
+ * at 179 call sites.
+ */
+types.setTypeParser(20, Number); // int8: COUNT(*), SUM(integer)
+// SUM over a bigint widens again, to numeric, and arrives as a string by
+// the same rule. The frontend registers both; so does this.
+types.setTypeParser(1700, Number); // numeric
 
 type Global = typeof globalThis & { __assambleyaPool?: Pool };
 

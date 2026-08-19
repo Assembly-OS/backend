@@ -13,12 +13,12 @@ export async function POST(request: Request) {
   const body = (await request.json()) as Record<string, unknown>;
   const companyId = parseId(body.company_id);
   const firstName = str(body.first_name, 80);
-  if (!companyId || !companyById(companyId))
+  if (!companyId || !(await companyById(companyId)))
     return NextResponse.json({ error: "COMPANY_NOT_FOUND" }, { status: 400 });
   if (!firstName)
     return NextResponse.json({ error: "NAME_REQUIRED" }, { status: 400 });
 
-  const id = createContact({
+  const id = await createContact({
     company_id: companyId,
     first_name: firstName,
     last_name: str(body.last_name, 80) ?? "",

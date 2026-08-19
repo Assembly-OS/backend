@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { LOCALES } from "@/lib/i18n/config";
 import { LOCALE_COOKIE } from "@/lib/session";
 import { currentUser } from "@/lib/session";
-import { run } from "@/lib/db";
+import { run } from "@/lib/pg";
 import type { Locale } from "@/lib/types";
 
 export async function POST(request: Request) {
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   }
 
   const user = await currentUser();
-  if (user) run("UPDATE users SET lang = ? WHERE id = ?", locale, user.id);
+  if (user) await run("UPDATE users SET lang = ? WHERE id = ?", locale, user.id);
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set(LOCALE_COOKIE, locale, {

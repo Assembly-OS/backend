@@ -40,7 +40,14 @@ export async function GET(request: Request) {
   if (!user) return new Response("AUTH", { status: 401 });
 
   const encoder = new TextEncoder();
-  let last = pulse(user);
+  let last = await pulse(user);
+
+  // Everything the stream needs from the database is resolved before the
+  // stream is constructed: an async `start` would postpone the abort handler
+  // and leak the heartbeat intervals if the client dropped mid-await.
+  const initialPartners = await conversationPartnerIds(user.id);
+  const cameOnline = connect(user.id);
+  const connectedAt = await touchLastSeen(user.id);
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -61,21 +68,27 @@ export async function GET(request: Request) {
       // Managers additionally track org-wide activity (orgRev), so their pulse
       // must be recomputed on any task event, not only ones naming them.
       const manager = isManager(user.role);
-      let partners = new Set(conversationPartnerIds(user.id));
+      let partners = new Set(initialPartners);
 
       // A write signals the bus with the ids it touched. Recompute this user's
       // pulse only when it could concern them; skip the query otherwise.
-      const onBump = (userIds: number[]) => {
+      // The bus does not await listeners, so a failed refresh is swallowed
+      // here rather than escaping as an unhandled rejection.
+      const onBump = async (userIds: number[]) => {
         if (!manager && !userIds.includes(user.id)) return;
-        const next = pulse(user);
-        if (changed(last, next)) {
-          // A new conversation may have started — keep presence routing current.
-          const messagesChanged = last.msgRev !== next.msgRev;
-          last = next;
-          if (messagesChanged) {
-            partners = new Set(conversationPartnerIds(user.id));
+        try {
+          const next = await pulse(user);
+          if (changed(last, next)) {
+            // A new conversation may have started — keep presence routing current.
+            const messagesChanged = last.msgRev !== next.msgRev;
+            last = next;
+            if (messagesChanged) {
+              partners = new Set(await conversationPartnerIds(user.id));
+            }
+            send("pulse", next);
           }
-          send("pulse", next);
+        } catch {
+          /* one missed refresh; the next bump recomputes from scratch */
         }
       };
       const unsubscribe = subscribe(onBump);
@@ -87,8 +100,6 @@ export async function GET(request: Request) {
 
       // Presence: announce this user online (once, on the first tab) and relay
       // online/offline changes only for people they actually converse with.
-      const cameOnline = connect(user.id);
-      const connectedAt = touchLastSeen(user.id);
       if (cameOnline) {
         publishPresence({
           id: user.id,
@@ -109,7 +120,10 @@ export async function GET(request: Request) {
 
       // Keep last_seen fresh while the tab is open (see HEARTBEAT_MS).
       const pulseSeen = setInterval(() => {
-        if (open) touchLastSeen(user.id);
+        // Fire and forget: a heartbeat that cannot reach the database is not
+        // worth tearing the connection down for, but its rejection must not
+        // escape the timer callback either.
+        if (open) void touchLastSeen(user.id).catch(() => {});
       }, HEARTBEAT_MS);
 
       const close = () => {
@@ -123,12 +137,20 @@ export async function GET(request: Request) {
         // Last tab closed → user is offline; stamp and broadcast the moment.
         const wentOffline = disconnect(user.id);
         if (wentOffline) {
-          publishPresence({
-            id: user.id,
-            login: user.login,
-            online: false,
-            lastSeen: touchLastSeen(user.id),
-          });
+          // The closing stamp is written asynchronously now, and the broadcast
+          // must carry the value that was actually stored — so it waits for
+          // the write instead of guessing. `close` itself stays synchronous:
+          // the controller has to be closed without waiting on the database.
+          void touchLastSeen(user.id)
+            .then((lastSeen) => {
+              publishPresence({
+                id: user.id,
+                login: user.login,
+                online: false,
+                lastSeen,
+              });
+            })
+            .catch(() => {});
         }
         try {
           controller.close();

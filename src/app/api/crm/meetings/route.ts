@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, now, run } from "@/lib/db";
+import { get, insert, now } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { canWrite } from "@/lib/crm-access";
 import { companyById, createAgreement, touchCompany } from "@/lib/crm";
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   if (!title) return NextResponse.json({ error: "TITLE_REQUIRED" }, { status: 400 });
 
   const companyId = parseId(body.company_id);
-  if (companyId && !companyById(companyId))
+  if (companyId && !(await companyById(companyId)))
     return NextResponse.json({ error: "COMPANY_NOT_FOUND" }, { status: 400 });
 
   const heldAt = str(body.held_at, 10);
@@ -39,7 +39,9 @@ export async function POST(request: Request) {
   const transcript = str(body.transcript, 200_000) ?? "";
   const responsible = parseId(body.responsible_id) ?? user.id;
 
-  run(
+  // RETURNING id rather than a following SELECT MAX(id): the maximum is only
+  // this row's id while a single process writes, and the bot writes too.
+  const meetingId = await insert(
     `INSERT INTO meetings
        (title, owner_id, company_id, held_at, place, participants, responsible_id,
         description, next_steps, transcript, lang, duration, created_at, updated_at)
@@ -59,11 +61,8 @@ export async function POST(request: Request) {
     now(),
     now(),
   );
-  const meetingId = Number(
-    get<{ id: number }>("SELECT MAX(id) AS id FROM meetings")!.id,
-  );
 
-  if (companyId) touchCompany(companyId, heldAt ?? now().slice(0, 10));
+  if (companyId) await touchCompany(companyId, heldAt ?? now().slice(0, 10));
 
   // Agreements the person typed in themselves, before any model sees the text.
   const manual = Array.isArray(body.agreements) ? body.agreements : [];
@@ -73,7 +72,7 @@ export async function POST(request: Request) {
     const description = str(item.description, 1000);
     if (!description) continue;
     const deadline = str(item.deadline, 10);
-    createAgreement({
+    await createAgreement({
       company_id: companyId,
       meeting_id: meetingId,
       description,
@@ -123,8 +122,8 @@ async function agreementsFromAnalysis(
   companyId: number | null,
   createdBy: number,
 ): Promise<number> {
-  const drafts = get<{ ids: string }>(
-    `SELECT GROUP_CONCAT(id) AS ids FROM agent_proposals
+  const drafts = await get<{ ids: string }>(
+    `SELECT string_agg(id::text, ',') AS ids FROM agent_proposals
       WHERE run_id IN (SELECT id FROM agent_runs
                         WHERE source_kind = 'transcript' AND source_ref = ?)
         AND action = 'suggest_task'`,
@@ -134,7 +133,7 @@ async function agreementsFromAnalysis(
 
   let made = 0;
   for (const raw of drafts.ids.split(",")) {
-    const proposal = get<{ title: string; payload: string | null }>(
+    const proposal = await get<{ title: string; payload: string | null }>(
       "SELECT title, payload FROM agent_proposals WHERE id = ?",
       Number(raw),
     );
@@ -145,7 +144,7 @@ async function agreementsFromAnalysis(
     } catch {
       /* a malformed payload still yields a usable description */
     }
-    createAgreement({
+    await createAgreement({
       company_id: companyId,
       meeting_id: meetingId,
       description: proposal.title,
@@ -164,7 +163,7 @@ export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
   return NextResponse.json({
-    staff: assignableUsers(user).map((person) => ({
+    staff: (await assignableUsers(user)).map((person) => ({
       id: person.id,
       full_name: person.full_name,
     })),

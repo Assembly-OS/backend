@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { now, run } from "@/lib/db";
+import { now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import {
@@ -22,7 +22,7 @@ async function resolve(idParam: string) {
 
   // Membership is the whole access rule: a group is private to its members,
   // and non-members are told nothing beyond "not found".
-  if (!isGroupMember(groupId, user.id))
+  if (!(await isGroupMember(groupId, user.id)))
     return {
       error: NextResponse.json({ error: "NOT_FOUND" }, { status: 404 }),
     };
@@ -40,9 +40,9 @@ export async function GET(
 
   // `?before=<id>` is a scroll-back: history, so it must not move the read mark.
   const before = Number(new URL(request.url).searchParams.get("before")) || undefined;
-  if (!before && markGroupRead(groupId, user.id)) publish(user.id);
+  if (!before && (await markGroupRead(groupId, user.id))) publish(user.id);
 
-  const messages = groupThread(groupId, { before });
+  const messages = await groupThread(groupId, { before });
   return NextResponse.json({
     messages,
     hasMore: messages.length === THREAD_PAGE,
@@ -61,7 +61,7 @@ export async function POST(
   const text = str(body, 4000);
   if (!text) return NextResponse.json({ error: "EMPTY" }, { status: 400 });
 
-  run(
+  await run(
     "INSERT INTO messages (from_user_id, group_id, body, created_at) VALUES (?,?,?,?)",
     user.id,
     groupId,
@@ -70,8 +70,8 @@ export async function POST(
   );
 
   // The sender has by definition read their own message.
-  markGroupRead(groupId, user.id);
-  publish(...groupMembers(groupId).map((member) => member.id));
+  await markGroupRead(groupId, user.id);
+  publish(...(await groupMembers(groupId)).map((member) => member.id));
 
-  return NextResponse.json({ messages: groupThread(groupId) });
+  return NextResponse.json({ messages: await groupThread(groupId) });
 }

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import { get } from "@/lib/db";
+import { get } from "@/lib/pg";
 import { canSubmitToAi } from "@/lib/agents/access";
 import { ingestMeeting, MAX_AUDIO } from "@/lib/agents/meeting-ingest";
 import { oneOf, str } from "@/lib/validate";
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   if (!Number.isFinite(telegramId) || telegramId <= 0)
     return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const user = get<User>(
+  const user = await get<User>(
     "SELECT * FROM users WHERE telegram_id = ? AND is_active = 1",
     telegramId,
   );

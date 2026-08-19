@@ -1,4 +1,4 @@
-import { all, get, now, run } from "@/lib/db";
+import { all, get, insert, now, run } from "@/lib/pg";
 import { publish } from "@/lib/events";
 import { notify } from "@/lib/notifications";
 import { notifyBot } from "@/lib/notify-bot";
@@ -51,8 +51,11 @@ function runsImmediately(agent: AgentSpec, action: ActionVerb): boolean {
 }
 
 /** Marks a proposal as carried out, with what it produced. */
-function markExecuted(proposalId: number, result: string): void {
-  run(
+async function markExecuted(
+  proposalId: number,
+  result: string,
+): Promise<void> {
+  await run(
     `UPDATE agent_proposals
         SET status = 'executed', decided_by = 'avto', decided_at = ?, result = ?
       WHERE id = ?`,
@@ -81,8 +84,8 @@ export interface IntakeResult {
 }
 
 /** People this submitter may hand work to, in the shape the model is shown. */
-function candidatesFor(user: User): Candidate[] {
-  return assignableUsers(user).map((person) => ({
+async function candidatesFor(user: User): Promise<Candidate[]> {
+  return (await assignableUsers(user)).map((person) => ({
     login: person.login,
     full_name: person.full_name,
     role: person.role,
@@ -91,7 +94,7 @@ function candidatesFor(user: User): Candidate[] {
   }));
 }
 
-function writeRun(fields: {
+async function writeRun(fields: {
   agent: string;
   owner: User;
   sourceKind: string;
@@ -104,8 +107,10 @@ function writeRun(fields: {
   tokensOut?: number;
   durationMs?: number;
   usedModel?: string;
-}): number {
-  run(
+}): Promise<number> {
+  // RETURNING, not a following SELECT MAX(id): that id is only this run's
+  // while a single process writes, and the move to a server ends that.
+  return await insert(
     `INSERT INTO agent_runs
        (agent, trigger, actor, status, detail, context_rows, proposals,
         tokens_in, tokens_out, duration_ms, used_model,
@@ -127,7 +132,6 @@ function writeRun(fields: {
     fields.sourceRef,
     now(),
   );
-  return Number(get<{ id: number }>("SELECT MAX(id) AS id FROM agent_runs")!.id);
 }
 
 /**
@@ -139,13 +143,13 @@ function writeRun(fields: {
  * when a department has no head is deliberate: a proposal routed to nobody is
  * a proposal nobody acts on.
  */
-function reviewerFor(assigneeId: number, owner: User): number {
-  const assignee = get<{ department: string | null; id: number }>(
+async function reviewerFor(assigneeId: number, owner: User): Promise<number> {
+  const assignee = await get<{ department: string | null; id: number }>(
     "SELECT id, department FROM users WHERE id = ?",
     assigneeId,
   );
   if (assignee?.department) {
-    const head = get<{ id: number }>(
+    const head = await get<{ id: number }>(
       `SELECT id FROM users
         WHERE is_active = 1 AND role = 'BOLIM_RAHBARI' AND department = ?
         ORDER BY id LIMIT 1`,
@@ -167,17 +171,17 @@ function reviewerFor(assigneeId: number, owner: User): number {
  * The proposal row is written first either way, so a task can never exist
  * without the record of which run produced it.
  */
-function fileDraft(
+async function fileDraft(
   runId: number,
   agent: AgentSpec,
   owner: User,
   draft: DraftTask,
   allowed: Map<string, Candidate>,
-): "created" | "queued" | "dropped" {
+): Promise<"created" | "queued" | "dropped"> {
   const target = allowed.get(draft.assignee?.trim().toLowerCase() ?? "");
   if (!target) return "dropped";
 
-  const assignee = get<{ id: number }>(
+  const assignee = await get<{ id: number }>(
     "SELECT id FROM users WHERE login = ? AND is_active = 1",
     target.login,
   );
@@ -187,7 +191,7 @@ function fileDraft(
     ? draft.deadline
     : null;
 
-  run(
+  const proposalId = await insert(
     `INSERT INTO agent_proposals
        (run_id, agent, action, title, body, severity, subject_kind, subject_id,
         payload, status, owner_user_id, reviewer_user_id, created_at)
@@ -211,24 +215,21 @@ function fileDraft(
     }),
     "pending",
     owner.id,
-    reviewerFor(assignee.id, owner),
+    await reviewerFor(assignee.id, owner),
     now(),
   );
 
   if (!runsImmediately(agent, "suggest_task")) return "queued";
 
-  const proposalId = Number(
-    get<{ id: number }>("SELECT MAX(id) AS id FROM agent_proposals")!.id,
-  );
   try {
-    const code = createTaskFromProposal(owner.id, {
+    const code = await createTaskFromProposal(owner.id, {
       toUserId: assignee.id,
       title: draft.title.slice(0, 200),
       description: draft.description,
       priority: draft.priority,
       deadline,
     });
-    markExecuted(proposalId, `topshiriq yaratildi: ${code}`);
+    await markExecuted(proposalId, `topshiriq yaratildi: ${code}`);
     return "created";
   } catch {
     // The assignment graph refused it, or the row would not write. The
@@ -252,9 +253,9 @@ export async function runDocumentIntake(
   const started = Date.now();
   const agent = agentById("document")!;
 
-  const candidates = candidatesFor(owner);
+  const candidates = await candidatesFor(owner);
   if (candidates.length === 0) {
-    const runId = writeRun({
+    const runId = await writeRun({
       agent: agent.id,
       owner,
       sourceKind: source.kind,
@@ -281,7 +282,7 @@ export async function runDocumentIntake(
     agent.tokenBudget,
   );
   if (!analysis) {
-    const runId = writeRun({
+    const runId = await writeRun({
       agent: agent.id,
       owner,
       sourceKind: source.kind,
@@ -303,7 +304,7 @@ export async function runDocumentIntake(
   const allowed = new Map(
     candidates.map((person) => [person.login.toLowerCase(), person]),
   );
-  const runId = writeRun({
+  const runId = await writeRun({
     agent: agent.id,
     owner,
     sourceKind: source.kind,
@@ -317,7 +318,7 @@ export async function runDocumentIntake(
     usedModel: analysis.model,
   });
 
-  run(
+  await run(
     `INSERT INTO agent_proposals
        (run_id, agent, action, title, body, severity, status, owner_user_id, created_at)
      VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -336,7 +337,7 @@ export async function runDocumentIntake(
   let drafts = 0;
   let dropped = 0;
   for (const draft of analysis.tasks) {
-    const outcome = fileDraft(runId, agent, owner, draft, allowed);
+    const outcome = await fileDraft(runId, agent, owner, draft, allowed);
     if (outcome === "created") created++;
     else if (outcome === "queued") drafts++;
     else dropped++;
@@ -347,7 +348,7 @@ export async function runDocumentIntake(
   if (dropped > 0)
     notes.push(`${dropped} ta taklif noto'g'ri mas'ul tufayli rad etildi`);
   if (notes.length > 0) {
-    run(
+    await run(
       "UPDATE agent_runs SET detail = ? WHERE id = ?",
       notes.join("; "),
       runId,
@@ -386,14 +387,16 @@ function briefIn(analysis: MeetingAnalysis, lang: string): string {
   );
 }
 
-function briefRecipients(): { id: number; full_name: string; lang: string | null }[] {
+async function briefRecipients(): Promise<
+  { id: number; full_name: string; lang: string | null }[]
+> {
   const extra = (process.env.MEETING_BRIEF_LOGINS ?? "muslimbek.komiljonov")
     .split(",")
     .map((login) => login.trim().toLowerCase())
     .filter(Boolean);
 
   const marks = extra.map(() => "?").join(",") || "''";
-  return all<{ id: number; full_name: string; lang: string | null }>(
+  return await all<{ id: number; full_name: string; lang: string | null }>(
     `SELECT id, full_name, lang FROM users
       WHERE is_active = 1
         AND (role = 'RAIS' OR LOWER(login) IN (${marks}))`,
@@ -411,7 +414,7 @@ export async function runMeetingIntake(
 ): Promise<IntakeResult> {
   const started = Date.now();
   const agent = agentById("meeting")!;
-  const candidates = candidatesFor(owner);
+  const candidates = await candidatesFor(owner);
 
   const analysis = await analyzeMeeting(
     transcript,
@@ -421,10 +424,10 @@ export async function runMeetingIntake(
     lang,
     // What earlier meetings left behind, so this one does not re-derive the
     // decisions they already reached.
-    recallMemory(),
+    await recallMemory(),
   );
   if (!analysis) {
-    const runId = writeRun({
+    const runId = await writeRun({
       agent: agent.id,
       owner,
       sourceKind: "transcript",
@@ -443,7 +446,7 @@ export async function runMeetingIntake(
     };
   }
 
-  const runId = writeRun({
+  const runId = await writeRun({
     agent: agent.id,
     owner,
     sourceKind: "transcript",
@@ -461,10 +464,15 @@ export async function runMeetingIntake(
   // using without a second model call — and so a conclusion survives even if
   // every task it produced is later rejected.
   for (const code of ["uz", "ru", "en"] as const) {
-    run(
-      `INSERT OR REPLACE INTO meeting_conclusions
+    await run(
+      `INSERT INTO meeting_conclusions
          (meeting_id, lang, summary, key_points, decisions, created_at)
-       VALUES (?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?)
+       ON CONFLICT (meeting_id, lang) DO UPDATE
+          SET summary = EXCLUDED.summary,
+              key_points = EXCLUDED.key_points,
+              decisions = EXCLUDED.decisions,
+              created_at = EXCLUDED.created_at`,
       meetingId,
       code,
       pick(analysis.summary, code),
@@ -476,7 +484,7 @@ export async function runMeetingIntake(
 
   const brief = briefIn(analysis, owner.lang ?? "uz");
 
-  run(
+  await run(
     `INSERT INTO agent_proposals
        (run_id, agent, action, title, body, severity, subject_kind, subject_id,
         status, owner_user_id, created_at)
@@ -498,11 +506,11 @@ export async function runMeetingIntake(
   // that is the whole point of recording it. The proposal row is still written
   // first, so the audit log shows what was sent and to whom.
   const sendNow = runsImmediately(agent, "notify");
-  for (const recipient of briefRecipients()) {
+  for (const recipient of await briefRecipients()) {
     // Each recipient reads the conclusion in the language they set for
     // themselves — the analysis already produced all three.
     const theirs = briefIn(analysis, recipient.lang ?? "uz");
-    run(
+    const proposalId = await insert(
       `INSERT INTO agent_proposals
          (run_id, agent, action, title, body, severity, subject_kind, subject_id,
           payload, status, owner_user_id, created_at)
@@ -522,23 +530,20 @@ export async function runMeetingIntake(
     );
     if (!sendNow) continue;
 
-    const proposalId = Number(
-      get<{ id: number }>("SELECT MAX(id) AS id FROM agent_proposals")!.id,
-    );
     notifyBot(
       recipient.id,
       // Telegram rejects a message over 4096 characters outright, and a brief
       // that long has already failed at being a brief.
       `🤖 <b>${title}</b>\n${theirs.trim()}`.slice(0, 3800),
     );
-    markExecuted(proposalId, `xabar yuborildi: ${recipient.full_name}`);
+    await markExecuted(proposalId, `xabar yuborildi: ${recipient.full_name}`);
   }
 
   // What this meeting should still be known for. Written before the tasks so
   // a failure to create one does not cost the record of why it existed.
-  const remembered = rememberFacts(meetingId, analysis.memory ?? []);
+  const remembered = await rememberFacts(meetingId, analysis.memory ?? []);
   // Who this meeting was with, and what to put to them next.
-  const partners = recordPartners(meetingId, analysis.partners ?? []);
+  const partners = await recordPartners(meetingId, analysis.partners ?? []);
 
   const allowed = new Map(
     candidates.map((person) => [person.login.toLowerCase(), person]),
@@ -547,14 +552,14 @@ export async function runMeetingIntake(
   let drafts = 0;
   let dropped = 0;
   for (const draft of analysis.tasks) {
-    const outcome = fileDraft(runId, agent, owner, draft, allowed);
+    const outcome = await fileDraft(runId, agent, owner, draft, allowed);
     if (outcome === "created") created++;
     else if (outcome === "queued") drafts++;
     else dropped++;
   }
 
   if (created > 0) {
-    run(
+    await run(
       "UPDATE agent_runs SET detail = ? WHERE id = ?",
       `${created} ta topshiriq yaratildi`,
       runId,
@@ -585,7 +590,7 @@ export async function runMeetingIntake(
  * event, same Telegram ping — so nothing downstream can tell an AI-drafted
  * task from a hand-written one except the audit trail that says so.
  */
-export function createTaskFromProposal(
+export async function createTaskFromProposal(
   ownerId: number,
   payload: {
     toUserId: number;
@@ -594,9 +599,9 @@ export function createTaskFromProposal(
     priority?: string;
     deadline?: string | null;
   },
-): string {
-  const author = get<User>("SELECT * FROM users WHERE id = ?", ownerId);
-  const assignee = get<User>(
+): Promise<string> {
+  const author = await get<User>("SELECT * FROM users WHERE id = ?", ownerId);
+  const assignee = await get<User>(
     "SELECT * FROM users WHERE id = ? AND is_active = 1",
     payload.toUserId,
   );
@@ -604,16 +609,22 @@ export function createTaskFromProposal(
 
   // Re-check the assignment graph at execution time: the approver may have
   // lost the right to assign since the draft was filed.
-  if (!assignableUsers(author).some((person) => person.id === assignee.id)) {
+  if (
+    !(await assignableUsers(author)).some((person) => person.id === assignee.id)
+  ) {
     throw new Error("Bu xodimga topshiriq berish huquqi yo'q");
   }
 
   const seq =
-    Number(get<{ c: number }>("SELECT COUNT(*) AS c FROM tasks")?.c ?? 0) + 1;
+    Number(
+      (await get<{ c: number }>("SELECT COUNT(*) AS c FROM tasks"))?.c ?? 0,
+    ) + 1;
   const code = `T-${String(seq).padStart(4, "0")}`;
   const stamp = now();
 
-  run(
+  // RETURNING, not a lookup by `code` afterwards: code carries no unique
+  // constraint, so that SELECT could hand back another writer's task.
+  const taskId = await insert(
     `INSERT INTO tasks (code, title, description, from_user_id, to_user_id,
                         to_department, priority, status, deadline, uyushma_id, created_at)
      VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?)`,
@@ -629,10 +640,7 @@ export function createTaskFromProposal(
     stamp,
   );
 
-  const taskId = Number(
-    get<{ id: number }>("SELECT id FROM tasks WHERE code = ?", code)!.id,
-  );
-  run(
+  await run(
     "INSERT INTO task_events (task_id, user_id, action, comment, created_at) VALUES (?,?,'YARATILDI',?,?)",
     taskId,
     author.id,
@@ -641,7 +649,7 @@ export function createTaskFromProposal(
   );
 
   publish(author.id, assignee.id);
-  notify({
+  await notify({
     userId: assignee.id,
     kind: "task",
     title: `${code} · ${payload.title}`,

@@ -1,4 +1,4 @@
-import { all, get, now, run } from "./db";
+import { all, get, now, run } from "./pg";
 import { notifyBot } from "./notify-bot";
 
 /**
@@ -44,10 +44,10 @@ export interface NotifyInput {
  * Records one notification. Returns false when it already existed — which is
  * the normal, expected outcome of a sweep that has already run.
  */
-export function notify(input: NotifyInput): boolean {
+export async function notify(input: NotifyInput): Promise<boolean> {
   const existing =
     input.entity && input.entityId
-      ? get<{ id: number }>(
+      ? await get<{ id: number }>(
           `SELECT id FROM notifications
             WHERE user_id = ? AND kind = ? AND entity = ? AND entity_id = ?`,
           input.userId,
@@ -59,7 +59,7 @@ export function notify(input: NotifyInput): boolean {
   if (existing) return false;
 
   try {
-    run(
+    await run(
       `INSERT INTO notifications
          (user_id, kind, title, body, href, entity, entity_id, created_at)
        VALUES (?,?,?,?,?,?,?,?)`,
@@ -87,17 +87,19 @@ export function notify(input: NotifyInput): boolean {
   return true;
 }
 
-export function unreadCount(userId: number): number {
-  return Number(
-    get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL",
-      userId,
-    )?.n ?? 0,
+export async function unreadCount(userId: number): Promise<number> {
+  const row = await get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL",
+    userId,
   );
+  return Number(row?.n ?? 0);
 }
 
-export function listNotifications(userId: number, limit = 30): Notification[] {
-  return all<Notification>(
+export async function listNotifications(
+  userId: number,
+  limit = 30,
+): Promise<Notification[]> {
+  return await all<Notification>(
     `SELECT id, kind, title, body, href, read_at, created_at
        FROM notifications WHERE user_id = ?
       ORDER BY read_at IS NOT NULL, id DESC LIMIT ?`,
@@ -106,9 +108,9 @@ export function listNotifications(userId: number, limit = 30): Notification[] {
   );
 }
 
-export function markRead(userId: number, id?: number): void {
+export async function markRead(userId: number, id?: number): Promise<void> {
   if (id) {
-    run(
+    await run(
       "UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL",
       now(),
       id,
@@ -116,7 +118,7 @@ export function markRead(userId: number, id?: number): void {
     );
     return;
   }
-  run(
+  await run(
     "UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
     now(),
     userId,
@@ -139,10 +141,12 @@ const LABELS: Record<string, { dueToday: string; dueSoon: string }> = {
   en: { dueToday: "Due today", dueSoon: "Deadline approaching" },
 };
 
-function labelsFor(userId: number) {
-  const lang = get<{ lang: string | null }>(
-    "SELECT lang FROM users WHERE id = ?",
-    userId,
+async function labelsFor(userId: number) {
+  const lang = (
+    await get<{ lang: string | null }>(
+      "SELECT lang FROM users WHERE id = ?",
+      userId,
+    )
   )?.lang;
   return LABELS[lang ?? "uz"] ?? LABELS.uz;
 }
@@ -166,8 +170,8 @@ interface DueRow {
  * `PENDING → SENT` in the same pass that writes its notification, and the
  * unique index catches the case where two callers arrive at once.
  */
-export function sweepReminders(): number {
-  const due = all<DueRow>(
+export async function sweepReminders(): Promise<number> {
+  const due = await all<DueRow>(
     `SELECT r.id, r.user_id, r.agreement_id, r.kind, r.message,
             a.description, a.deadline, a.company_id, p.name AS company
        FROM reminders r
@@ -183,14 +187,18 @@ export function sweepReminders(): number {
     // Marked first: a notification that fails to write is a missed ping, but a
     // reminder that stays PENDING after firing is an alarm that repeats every
     // minute until somebody kills the process.
-    run("UPDATE reminders SET status = 'SENT', sent_at = ? WHERE id = ?", now(), row.id);
+    await run(
+      "UPDATE reminders SET status = 'SENT', sent_at = ? WHERE id = ?",
+      now(),
+      row.id,
+    );
 
     const text = row.description ?? row.message;
     if (!text) continue;
 
     const when = row.deadline ? ` · ${row.deadline}` : "";
-    const labels = labelsFor(row.user_id);
-    notify({
+    const labels = await labelsFor(row.user_id);
+    await notify({
       userId: row.user_id,
       kind: "reminder",
       title: `${row.kind === "deadline" ? labels.dueToday : labels.dueSoon}${when}`,

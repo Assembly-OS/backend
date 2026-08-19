@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get, run } from "@/lib/db";
+import { get, run } from "@/lib/pg";
 import {
   createToken,
   isSecureRequest,
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
   const password = typeof body.password === "string" ? body.password : "";
 
   // Already linked: the signature is the whole credential.
-  const linked = get<Row>(
+  const linked = await get<Row>(
     "SELECT * FROM users WHERE telegram_id = ? AND is_active = 1",
     telegramId,
   );
@@ -81,8 +81,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const user = get<Row>(
-    "SELECT * FROM users WHERE login = ? COLLATE NOCASE AND is_active = 1",
+  // Регистр логина не важен, как при COLLATE NOCASE: поиск попадает
+  // в idx_users_login_ci — уникальный индекс по lower(login).
+  const user = await get<Row>(
+    "SELECT * FROM users WHERE lower(login) = lower(?) AND is_active = 1",
     login,
   );
   if (!user || !verifyPassword(password, user.password_hash)) {
@@ -95,8 +97,8 @@ export async function POST(request: Request) {
   // keeps the column unique without a constraint that would fail the login:
   // if somebody re-links from a colleague's phone, the last link wins and the
   // stale one stops receiving another person's notifications.
-  run("UPDATE users SET telegram_id = NULL WHERE telegram_id = ?", telegramId);
-  run("UPDATE users SET telegram_id = ? WHERE id = ?", telegramId, user.id);
+  await run("UPDATE users SET telegram_id = NULL WHERE telegram_id = ?", telegramId);
+  await run("UPDATE users SET telegram_id = ? WHERE id = ?", telegramId, user.id);
 
   return sessionFor(user, request, "linked");
 }

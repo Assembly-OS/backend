@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { get } from "@/lib/db";
+import { get } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { canSubmitToAi } from "@/lib/agents/access";
 import { parseRange, resolvePath } from "@/lib/uploads";
@@ -27,7 +27,7 @@ export async function GET(
   const meetingId = parseId((await params).id);
   if (!meetingId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const meeting = get<{ audio_key: string | null; owner_id: number }>(
+  const meeting = await get<{ audio_key: string | null; owner_id: number }>(
     "SELECT audio_key, owner_id FROM meetings WHERE id = ?",
     meetingId,
   );
