@@ -138,6 +138,61 @@ export async function insert(sql: string, ...params: Param[]): Promise<number> {
   return Number(result.rows[0]?.id);
 }
 
+/** Queries inside one transaction — the same interface as the module-level
+ *  `all` / `get` / `run` / `insert`, so a body can be moved in or out of a
+ *  transaction without rewriting its statements. */
+export interface Tx {
+  all<T>(sql: string, ...params: Param[]): Promise<T[]>;
+  get<T>(sql: string, ...params: Param[]): Promise<T | undefined>;
+  run(sql: string, ...params: Param[]): Promise<void>;
+  insert(sql: string, ...params: Param[]): Promise<number>;
+}
+
+/**
+ * One transaction on one connection.
+ *
+ * The module-level helpers take their **own** connection from the pool on
+ * every call, so a `BEGIN` issued through `run()` would not cover the next
+ * statement — it would open a transaction on a client that is handed straight
+ * back. Anything that must happen entirely or not at all goes here: creating a
+ * task together with its chain of stages, handing a stage on to the next
+ * person. A crash halfway through those would leave `tasks` pointing at one
+ * person and `task_stages` insisting on another — an assignment nobody holds,
+ * and a defect that is rare and impossible to reproduce.
+ */
+export async function tx<T>(fn: (q: Tx) => Promise<T>): Promise<T> {
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+    const q: Tx = {
+      async all<R>(sql: string, ...params: Param[]) {
+        const result = await client.query(toPlaceholders(sql), params as unknown[]);
+        return result.rows as R[];
+      },
+      async get<R>(sql: string, ...params: Param[]) {
+        return (await q.all<R>(sql, ...params))[0];
+      },
+      async run(sql: string, ...params: Param[]) {
+        await client.query(toPlaceholders(sql), params as unknown[]);
+      },
+      async insert(sql: string, ...params: Param[]) {
+        const text = /returning/i.test(sql) ? sql : `${sql} RETURNING id`;
+        const result = await client.query(toPlaceholders(text), params as unknown[]);
+        return Number(result.rows[0]?.id);
+      },
+    };
+    const out = await fn(q);
+    await client.query("COMMIT");
+    return out;
+  } catch (error) {
+    // A failed ROLLBACK must not mask the error that caused it.
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /** 'YYYY-MM-DD HH:MM:SS' in UTC — the format every stored instant uses. */
 export function now(): string {
   return new Date().toISOString().slice(0, 19).replace("T", " ");

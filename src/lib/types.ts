@@ -104,6 +104,37 @@ export interface Task {
   accepted_at: string | null;
   submitted_at: string | null;
   closed_at: string | null;
+  /** Which stage of the chain this row currently mirrors. 1 on a plain task. */
+  current_stage: number;
+  /** How many stages the chain has. 1 on a plain task. */
+  stage_count: number;
+  /** Who approves the CURRENT stage. NULL = the author, as it always was. */
+  reviewer_user_id: number | null;
+}
+
+/**
+ * A stage's status: waiting its turn — or exactly what a task's status is.
+ *
+ * `KUTMOQDA` lives only in `task_stages` and never reaches `tasks.status`,
+ * which is why `TASK_STATUSES`, `statusTone`, the filter strips, the four
+ * dictionaries and the bot's status printing are untouched by chains.
+ */
+export type StageStatus = "KUTMOQDA" | TaskStatus;
+
+/** One person's turn at a task, in the order the author arranged them. */
+export interface TaskStage {
+  id: number;
+  task_id: number;
+  position: number;
+  to_user_id: number;
+  reviewer_user_id: number | null;
+  instruction: string | null;
+  status: StageStatus;
+  result_comment: string | null;
+  accepted_at: string | null;
+  submitted_at: string | null;
+  closed_at: string | null;
+  created_at: string;
 }
 
 export interface TaskRow extends Task {
@@ -116,6 +147,32 @@ export interface TaskRow extends Task {
   loyiha_name: string | null;
   /** The author's "fix this" note, live only until the work is resubmitted. */
   return_comment: string | null;
+  /** What the previous stage handed in — the second person has to be able to
+   *  read what the first one did, or passing the work on means nothing. */
+  prev_result_comment: string | null;
+  prev_stage_name: string | null;
+  /** The CURRENT stage's own instruction, if the author wrote one. */
+  stage_instruction: string | null;
+  /** Every participant's name, in order, for the stage strip: "A,B,C". */
+  stage_names: string | null;
+}
+
+/**
+ * A stage that has not come round yet — shown read-only under "Sizga
+ * kelmoqda". Nobody should be handed a half-finished task out of nowhere;
+ * seeing the queue ahead of you is the whole point of a chain.
+ */
+export interface QueuedTaskRow {
+  id: number;
+  code: string;
+  title: string;
+  deadline: string | null;
+  priority: Priority;
+  stage_position: number;
+  stage_count: number;
+  instruction: string | null;
+  from_name: string;
+  holder_name: string;
 }
 
 /** What a chat row carries: plain text, or one attached blob plus a caption. */

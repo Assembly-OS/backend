@@ -23,6 +23,7 @@ db.exec(fs.readFileSync(path.join(ROOT, "db", "schema.sql"), "utf8"));
 // Wipe rows but keep the schema, so re-seeding is idempotent.
 db.exec(`
   DELETE FROM task_events;
+  DELETE FROM task_stages;
   DELETE FROM messages;
   DELETE FROM tasks;
   DELETE FROM loyihalar;
@@ -369,7 +370,16 @@ const insertTask = db.prepare(`
   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 `);
 const insertEvent = db.prepare(`
-  INSERT INTO task_events (task_id, user_id, action, comment, created_at) VALUES (?,?,?,?,?)
+  INSERT INTO task_events (task_id, user_id, action, comment, created_at, stage_position)
+  VALUES (?,?,?,?,?,1)
+`);
+// A demo assignment is a chain of one. Seeding the stage row too keeps the
+// per-person counts (completed, the team table) reading the same numbers a
+// migrated production database reports.
+const insertStage = db.prepare(`
+  INSERT INTO task_stages (task_id, position, to_user_id, reviewer_user_id, instruction,
+                           status, result_comment, accepted_at, submitted_at, closed_at, created_at)
+  VALUES (?,1,?,NULL,NULL,?,?,?,?,?,?)
 `);
 
 let taskSeq = 0;
@@ -421,6 +431,17 @@ function addTask({
   );
   const taskId = Number(
     db.prepare("SELECT id FROM tasks WHERE code = ?").get(code).id,
+  );
+
+  insertStage.run(
+    taskId,
+    toId,
+    status,
+    result,
+    acceptedAt,
+    submittedAt,
+    closedAt,
+    createdAt,
   );
 
   insertEvent.run(taskId, fromId, "YARATILDI", null, createdAt);

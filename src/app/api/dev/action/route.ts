@@ -66,6 +66,14 @@ export async function POST(request: Request) {
         if (!TASK_STATUSES.includes(body.status as TaskStatus))
           return fail("Неизвестный статус");
         await run("UPDATE tasks SET status = ? WHERE id = ?", body.status!, id);
+        // The mirror moves with it: a stage row left on the old status would
+        // make the card and the buttons disagree about the same task.
+        await run(
+          "UPDATE task_stages SET status = ? WHERE task_id = ? AND position = (SELECT current_stage FROM tasks WHERE id = ?)",
+          body.status!,
+          id,
+          id,
+        );
         await run(
           "INSERT INTO task_events (task_id, user_id, action, comment, created_at) SELECT ?, from_user_id, ?, 'dev: смена статуса', ? FROM tasks WHERE id = ?",
           id,
@@ -87,6 +95,14 @@ export async function POST(request: Request) {
           to,
           u.department,
           u.uyushma_id ?? null,
+          id,
+        );
+        // Same reason as above — reassigning only the task would leave the
+        // current stage naming the previous executor.
+        await run(
+          "UPDATE task_stages SET to_user_id = ? WHERE task_id = ? AND position = (SELECT current_stage FROM tasks WHERE id = ?)",
+          to,
+          id,
           id,
         );
         return ok(`Переназначено на ${u.full_name}`);

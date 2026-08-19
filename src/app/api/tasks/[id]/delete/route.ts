@@ -33,12 +33,19 @@ export async function POST(
     from_user_id: number;
     to_user_id: number;
     status: string;
-  }>("SELECT id, from_user_id, to_user_id, status FROM tasks WHERE id = ?", taskId);
+    current_stage: number;
+  }>(
+    "SELECT id, from_user_id, to_user_id, status, current_stage FROM tasks WHERE id = ?",
+    taskId,
+  );
 
   if (!task) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
   if (task.from_user_id !== user.id && user.role !== "RAIS")
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
-  if (task.status !== "YANGI")
+  // `current_stage` as well as the status: a chain whose second turn is YANGI
+  // has a first participant who already finished their part, and withdrawing
+  // it would erase their work along with the audit rows that recorded it.
+  if (task.status !== "YANGI" || task.current_stage !== 1)
     return NextResponse.json({ error: "ALREADY_STARTED" }, { status: 409 });
 
   // The notification goes with it: a bell that opens a task which no longer
@@ -48,6 +55,7 @@ export async function POST(
   // The agreement it may have been raised from survives — the commitment was
   // real even if the assignment carrying it was a misfire.
   await run("UPDATE agreements SET task_id = NULL WHERE task_id = ?", taskId);
+  // `task_stages` goes with it through ON DELETE CASCADE.
   await run("DELETE FROM tasks WHERE id = ?", taskId);
 
   publish(task.from_user_id, task.to_user_id);

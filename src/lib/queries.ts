@@ -1,6 +1,13 @@
 import { all, get, now, run } from "./pg";
 import { isManager } from "./types";
-import type { MessageKind, Role, TaskRow, User } from "./types";
+import type {
+  MessageKind,
+  QueuedTaskRow,
+  Role,
+  TaskRow,
+  TaskStage,
+  User,
+} from "./types";
 
 /**
  * The author's note when they sent the work back — `tasks.result_comment` only
@@ -20,16 +27,35 @@ const RETURN_COMMENT = `
     ORDER BY e.id DESC LIMIT 1)
 `;
 
+/**
+ * Three joins that are NULL on almost every row, and that is the deal.
+ *
+ * A chain keeps `tasks` as the mirror of whichever stage is current, so every
+ * other query in this file — inbox, execute, sent, overdue, the dashboards —
+ * goes on meaning exactly what it meant before. The price is paid once, here:
+ * the current stage's own instruction, what the previous person handed in, and
+ * the names for the progress strip. On a one-stage assignment all four come
+ * back NULL and the UI shows nothing new.
+ */
 const TASK_SELECT = `
   SELECT t.*,
          uf.full_name AS from_name, uf.login AS from_login, uf.role AS from_role,
          ut.full_name AS to_name,   ut.login AS to_login,   ut.role AS to_role,
          l.name AS loyiha_name,
+         cs.instruction    AS stage_instruction,
+         ps.result_comment AS prev_result_comment,
+         pu.full_name      AS prev_stage_name,
+         (SELECT string_agg(su.full_name, ',' ORDER BY s2.position)
+            FROM task_stages s2 JOIN users su ON su.id = s2.to_user_id
+           WHERE s2.task_id = t.id AND t.stage_count > 1) AS stage_names,
          ${RETURN_COMMENT} AS return_comment
   FROM tasks t
   JOIN users uf ON uf.id = t.from_user_id
   JOIN users ut ON ut.id = t.to_user_id
   LEFT JOIN loyihalar l ON l.id = t.loyiha_id
+  LEFT JOIN task_stages cs ON cs.task_id = t.id AND cs.position = t.current_stage
+  LEFT JOIN task_stages ps ON ps.task_id = t.id AND ps.position = t.current_stage - 1
+  LEFT JOIN users pu ON pu.id = ps.to_user_id
 `;
 
 /* ------------------------------------------------------------------ */
@@ -69,12 +95,52 @@ export async function assignedTasks(userId: number): Promise<TaskRow[]> {
   );
 }
 
-/** «Ishchilardan qabul qilish» — results submitted to me for approval. */
+/**
+ * «Ishchilardan qabul qilish» — results submitted to me for approval.
+ *
+ * COALESCE, not `from_user_id`: when a stage names its own reviewer the work
+ * comes to them instead of the author, which is what lets a chain of two run
+ * "prepare → check" without a detour.
+ */
 export async function reviewTasks(userId: number): Promise<TaskRow[]> {
   return await all<TaskRow>(
-    `${TASK_SELECT} WHERE t.from_user_id = ? AND t.status = 'TEKSHIRUVDA'
+    `${TASK_SELECT} WHERE COALESCE(t.reviewer_user_id, t.from_user_id) = ?
+       AND t.status = 'TEKSHIRUVDA'
      ORDER BY t.submitted_at DESC`,
     userId,
+  );
+}
+
+/**
+ * Stages waiting their turn on this person — read-only, no buttons, in no
+ * counter. Nobody should have a half-finished task drop on them out of
+ * nowhere; seeing the queue ahead of you is the point of a chain.
+ */
+export async function queuedTasks(userId: number): Promise<QueuedTaskRow[]> {
+  return await all<QueuedTaskRow>(
+    `SELECT t.id, t.code, t.title, t.deadline, t.priority,
+            t.stage_count, s.position AS stage_position, s.instruction,
+            uf.full_name AS from_name, uh.full_name AS holder_name
+       FROM task_stages s
+       JOIN tasks t  ON t.id = s.task_id
+       JOIN users uf ON uf.id = t.from_user_id
+       JOIN users uh ON uh.id = t.to_user_id
+      WHERE s.to_user_id = ? AND s.status = 'KUTMOQDA'
+        AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')
+      ORDER BY t.deadline NULLS LAST, s.position`,
+    userId,
+  );
+}
+
+/** Every turn of one task, in order — for the expanded card. */
+export async function taskStages(
+  taskId: number,
+): Promise<(TaskStage & { to_name: string })[]> {
+  return await all<TaskStage & { to_name: string }>(
+    `SELECT s.*, u.full_name AS to_name
+       FROM task_stages s JOIN users u ON u.id = s.to_user_id
+      WHERE s.task_id = ? ORDER BY s.position`,
+    taskId,
   );
 }
 
@@ -255,8 +321,12 @@ export async function counters(userId: number): Promise<Counters> {
     `SELECT
        (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status = 'YANGI') AS incoming,
        (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status IN ('QABUL_QILINDI','BAJARILMOQDA','QAYTARILDI')) AS inWork,
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'TEKSHIRUVDA') AS onReview,
-       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND status = 'BAJARILDI') AS completed,
+       (SELECT COUNT(*) FROM tasks WHERE COALESCE(reviewer_user_id, from_user_id) = ?
+          AND status = 'TEKSHIRUVDA') AS onReview,
+       -- Counted over stages, not tasks: the moment a chain moves on, its
+       -- first participant stops being \`to_user_id\` and the work they
+       -- actually finished would vanish from their own tally.
+       (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = ? AND s.status = 'BAJARILDI') AS completed,
        (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND deadline IS NOT NULL AND deadline < ?
           AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ?) AS sent,
@@ -524,11 +594,20 @@ export interface TeamMemberStat extends User {
 
 export async function teamStats(managerId: number): Promise<TeamMemberStat[]> {
   return await all<TeamMemberStat>(
+    // All four read \`task_stages\`, which the backfill filled with one row per
+    // existing task — so on a plain assignment every number is what it was.
+    // On a chain they stop crediting the whole job to whoever happens to hold
+    // it last, and the deadline still comes from the task: there is one
+    // deadline for the whole chain, deliberately, so "overdue" keeps one
+    // meaning.
     `SELECT u.*,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_user_id = u.id) AS total,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_user_id = u.id AND t.status = 'BAJARILDI') AS done,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_user_id = u.id AND t.status IN ('YANGI','QABUL_QILINDI','BAJARILMOQDA','TEKSHIRUVDA')) AS active,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_user_id = u.id AND t.deadline < ? AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue
+            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id) AS total,
+            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id AND s.status = 'BAJARILDI') AS done,
+            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id
+               AND s.status IN ('YANGI','QABUL_QILINDI','BAJARILMOQDA','TEKSHIRUVDA')) AS active,
+            (SELECT COUNT(*) FROM task_stages s JOIN tasks t ON t.id = s.task_id
+              WHERE s.to_user_id = u.id AND t.deadline < ?
+                AND s.status NOT IN ('KUTMOQDA','BAJARILDI','RAD_ETILDI')) AS overdue
      FROM users u WHERE u.manager_id = ? AND u.is_active = 1
      ORDER BY u.full_name`,
     todayUtc(),

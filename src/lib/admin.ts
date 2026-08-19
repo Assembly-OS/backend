@@ -1,5 +1,5 @@
 import { all, get } from "./pg";
-import type { MessageKind, Role } from "./types";
+import type { MessageKind, Priority, Role, TaskStatus } from "./types";
 
 /**
  * Staff administration queries, used by the standalone panel under /admin.
@@ -235,5 +235,55 @@ export async function activeRaisCount(): Promise<number> {
         "SELECT COUNT(*) AS c FROM users WHERE role = 'RAIS' AND is_active = 1",
       )
     )?.c ?? 0,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Assignments                                                        */
+/* ------------------------------------------------------------------ */
+
+export interface AdminTaskRow {
+  id: number;
+  code: string;
+  title: string;
+  status: TaskStatus;
+  priority: Priority;
+  deadline: string | null;
+  created_at: string;
+  closed_at: string | null;
+  from_name: string;
+  from_login: string;
+  to_name: string;
+  to_login: string;
+  project: string | null;
+  current_stage: number;
+  stage_count: number;
+  /** Entries in the audit log. Deleting the task takes all of them with it. */
+  events: number;
+}
+
+/**
+ * Every assignment, newest first, for oversight rather than for work.
+ *
+ * The staff-facing lists are filtered by who you are and what is still open;
+ * this one deliberately is not. An administrator looking for the assignment
+ * somebody mis-sent needs to see it whatever its state and whoever it belongs
+ * to.
+ */
+export function adminTasks(): Promise<AdminTaskRow[]> {
+  return all<AdminTaskRow>(
+    `SELECT t.id, t.code, t.title, t.status, t.priority, t.deadline,
+            t.created_at, t.closed_at,
+            t.current_stage, t.stage_count,
+            author.full_name AS from_name, author.login AS from_login,
+            worker.full_name AS to_name,   worker.login AS to_login,
+            l.name AS project,
+            (SELECT COUNT(*) FROM task_events e WHERE e.task_id = t.id) AS events
+       FROM tasks t
+       JOIN users author ON author.id = t.from_user_id
+       JOIN users worker ON worker.id = t.to_user_id
+       LEFT JOIN loyihalar l ON l.id = t.loyiha_id
+      ORDER BY t.created_at DESC, t.id DESC
+      LIMIT 500`,
   );
 }

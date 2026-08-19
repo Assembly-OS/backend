@@ -581,3 +581,64 @@ ALTER TABLE partners ADD COLUMN IF NOT EXISTS notes TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS owner_user_id INTEGER;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS created_at TEXT;
 ALTER TABLE partners ADD COLUMN IF NOT EXISTS updated_at TEXT;
+
+-- =====================================================================
+-- Ko'p bosqichli topshiriq — цепочка этапов.
+--
+-- Одна работа, которую по очереди держат несколько человек. Строка tasks
+-- ВСЕГДА отражает ТЕКУЩИЙ этап, поэтому ни один существующий запрос по
+-- tasks не меняет смысла: кто держит поручение сейчас — тот и лежит в
+-- tasks.to_user_id, как лежал вчера.
+--
+-- Цена этого решения названа прямо: to_user_id/status/времена живут
+-- одновременно в двух таблицах, и БД инвариант проверить не может. Он
+-- держится тем, что пишет в них одна транзакция (pg.ts::tx).
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS task_stages (
+  id               INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  task_id          INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  position         INTEGER NOT NULL,                 -- 1..N, порядок в очереди
+  to_user_id       INTEGER NOT NULL REFERENCES users(id),
+  -- Кто утверждает ИМЕННО этот этап. NULL = автор поручения (сегодняшнее
+  -- поведение). Заполнено = исполнитель следующего этапа проверяет за
+  -- предыдущим, и тогда approve не требует захода автора, а return
+  -- возвращает работу назад её исполнителю.
+  reviewer_user_id INTEGER REFERENCES users(id),
+  instruction      TEXT,                             -- что делает этот человек; NULL = общее описание
+  -- 'KUTMOQDA' (очередь не дошла) либо любое значение TaskStatus.
+  -- KUTMOQDA живёт только здесь и никогда не попадает в tasks.status,
+  -- поэтому TASK_STATUSES, statusTone, фильтры и словари не трогаются.
+  status           TEXT NOT NULL DEFAULT 'KUTMOQDA',
+  result_comment   TEXT,                             -- что сдал ЭТОТ исполнитель
+  accepted_at      TEXT,
+  submitted_at     TEXT,
+  closed_at        TEXT,
+  created_at       TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  UNIQUE (task_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stages_user ON task_stages(to_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_stages_task ON task_stages(task_id, position);
+
+-- Зеркало текущего этапа на самой задаче. DEFAULT 1 — обычное поручение
+-- это цепочка длиной один, а не «цепочки нет».
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS current_stage    INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stage_count      INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reviewer_user_id INTEGER REFERENCES users(id);
+
+-- К какому этапу относится запись журнала. NULL у всех старых строк —
+-- отчёты обязаны читать её через COALESCE, см. reports.ts.
+ALTER TABLE task_events ADD COLUMN IF NOT EXISTS stage_position INTEGER;
+
+-- Бэкфилл: каждое существующее поручение становится цепочкой длиной 1,
+-- копируя собственное состояние. UPDATE по tasks не выполняется вообще —
+-- DEFAULT 1 у новых колонок уже даёт current_stage = stage_count = 1.
+-- ON CONFLICT, а не WHERE NOT EXISTS: файл выполняется при старте каждого
+-- процесса (веб и бот стартуют независимо), и проверка-перед-вставкой на
+-- двух одновременных стартах дала бы дубли.
+INSERT INTO task_stages (task_id, position, to_user_id, reviewer_user_id, status,
+                         result_comment, accepted_at, submitted_at, closed_at, created_at)
+SELECT id, 1, to_user_id, NULL, status,
+       result_comment, accepted_at, submitted_at, closed_at, created_at
+  FROM tasks
+ON CONFLICT (task_id, position) DO NOTHING;

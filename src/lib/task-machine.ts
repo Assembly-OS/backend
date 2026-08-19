@@ -45,11 +45,48 @@ export const TASK_EVENT: Record<TaskAction, string> = {
 };
 
 /** The task fields the machine needs — a subset, so tests can build tiny fakes. */
-export type TaskContext = Pick<Task, "status" | "from_user_id" | "to_user_id">;
+export type TaskContext = Pick<
+  Task,
+  | "status"
+  | "from_user_id"
+  | "to_user_id"
+  | "current_stage"
+  | "stage_count"
+  | "reviewer_user_id"
+>;
+
+/**
+ * Approving the middle of a chain does not close the work — it hands it on.
+ *
+ * The event codes are separate from `TASDIQLANDI` so the audit log can tell
+ * "this task is finished" from "this person's turn is finished".
+ */
+export const STAGE_APPROVED = "BOSQICH_TASDIQLANDI";
+export const STAGE_STARTED = "BOSQICH_BOSHLANDI";
 
 export type TransitionResult =
-  | { ok: true; to: TaskStatus; event: string; actor: "assignee" | "author" }
+  | {
+      ok: true;
+      to: TaskStatus;
+      event: string;
+      actor: "assignee" | "author";
+      /** Present ONLY when the work moves to the next stage. Absent — not
+       *  `undefined` — otherwise, because the tests compare whole objects. */
+      advance?: true;
+    }
   | { ok: false; error: "BAD_ACTION" | "FORBIDDEN" | "BAD_STATE" };
+
+/**
+ * Who may approve or return this task right now.
+ *
+ * The author by default, as it has always been. When a stage names its own
+ * reviewer — normally the person whose turn is next — that person approves
+ * instead: it lets the work pass straight on without a detour through the
+ * author, and lets a return go back to the executor who actually did it.
+ */
+export function approverOf(task: TaskContext): number {
+  return task.reviewer_user_id ?? task.from_user_id;
+}
 
 function isAction(value: string): value is TaskAction {
   return value in TASK_RULES;
@@ -73,11 +110,27 @@ export function authorizeTransition(
   const allowed =
     rule.actor === "assignee"
       ? task.to_user_id === userId
-      : task.from_user_id === userId;
+      : approverOf(task) === userId;
   if (!allowed) return { ok: false, error: "FORBIDDEN" };
 
   if (!rule.from.includes(task.status)) {
     return { ok: false, error: "BAD_STATE" };
+  }
+
+  // Approving anything but the last stage passes the work on instead of
+  // closing it. The status goes back to YANGI because to its new holder the
+  // assignment genuinely is new — and because an eighth status value would
+  // reach statusTone, the filter strips and four dictionaries for a shade of
+  // meaning. accept/reject/start/submit/return are untouched: they act on
+  // whoever sits in `to_user_id`, whoever that turns out to be.
+  if (action === "approve" && task.current_stage < task.stage_count) {
+    return {
+      ok: true,
+      to: "YANGI",
+      event: STAGE_APPROVED,
+      actor: "author",
+      advance: true,
+    };
   }
 
   return { ok: true, to: rule.to, event: TASK_EVENT[action], actor: rule.actor };

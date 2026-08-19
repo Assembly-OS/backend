@@ -62,7 +62,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at     TEXT NOT NULL DEFAULT (datetime('now')),
   accepted_at    TEXT,
   submitted_at   TEXT,
-  closed_at      TEXT
+  closed_at      TEXT,
+  -- Ko'p bosqichli topshiriq: зеркало текущего этапа цепочки.
+  -- 1/1 у обычного поручения, поэтому старые строки не меняются.
+  current_stage    INTEGER NOT NULL DEFAULT 1,
+  stage_count      INTEGER NOT NULL DEFAULT 1,
+  reviewer_user_id INTEGER REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS task_events (
@@ -71,8 +76,31 @@ CREATE TABLE IF NOT EXISTS task_events (
   user_id    INTEGER NOT NULL REFERENCES users(id),
   action     TEXT NOT NULL,
   comment    TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  -- К какому этапу цепочки относится запись. NULL у всех строк, записанных
+  -- до появления этапов, — отчёты читают её через COALESCE.
+  stage_position INTEGER
 );
+
+-- Этапы поручения: кто держит работу первым, кто вторым, и кто чей этап
+-- утверждает. Строка tasks зеркалит текущий этап.
+CREATE TABLE IF NOT EXISTS task_stages (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id          INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  position         INTEGER NOT NULL,
+  to_user_id       INTEGER NOT NULL REFERENCES users(id),
+  reviewer_user_id INTEGER REFERENCES users(id),
+  instruction      TEXT,
+  status           TEXT NOT NULL DEFAULT 'KUTMOQDA',
+  result_comment   TEXT,
+  accepted_at      TEXT,
+  submitted_at     TEXT,
+  closed_at        TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (task_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_stages_user ON task_stages(to_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_stages_task ON task_stages(task_id, position);
 
 -- A named conversation with more than two people in it.
 CREATE TABLE IF NOT EXISTS chat_groups (

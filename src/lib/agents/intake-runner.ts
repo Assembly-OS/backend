@@ -1,4 +1,4 @@
-import { all, get, insert, now, run } from "@/lib/pg";
+import { all, get, insert, now, run, tx } from "@/lib/pg";
 import { publish } from "@/lib/events";
 import { notify } from "@/lib/notifications";
 import { notifyBot } from "@/lib/notify-bot";
@@ -622,31 +622,49 @@ export async function createTaskFromProposal(
   const code = `T-${String(seq).padStart(4, "0")}`;
   const stamp = now();
 
-  // RETURNING, not a lookup by `code` afterwards: code carries no unique
-  // constraint, so that SELECT could hand back another writer's task.
-  const taskId = await insert(
-    `INSERT INTO tasks (code, title, description, from_user_id, to_user_id,
-                        to_department, priority, status, deadline, uyushma_id, created_at)
-     VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?)`,
-    code,
-    payload.title,
-    payload.description ?? null,
-    author.id,
-    assignee.id,
-    assignee.department,
-    payload.priority ?? "ORTA",
-    payload.deadline ?? null,
-    assignee.uyushma_id ?? null,
-    stamp,
-  );
+  // One transaction, and a `task_stages` row alongside the task: a plain
+  // assignment is a chain of one, and every count over stages — a person's
+  // completed total, the team table — would silently miss a task that never
+  // got its stage row.
+  const taskId = await tx(async (q) => {
+    // RETURNING, not a lookup by `code` afterwards: code carries no unique
+    // constraint, so that SELECT could hand back another writer's task.
+    const newId = await q.insert(
+      `INSERT INTO tasks (code, title, description, from_user_id, to_user_id,
+                          to_department, priority, status, deadline, uyushma_id, created_at,
+                          current_stage, stage_count, reviewer_user_id)
+       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,1,1,NULL)`,
+      code,
+      payload.title,
+      payload.description ?? null,
+      author.id,
+      assignee.id,
+      assignee.department,
+      payload.priority ?? "ORTA",
+      payload.deadline ?? null,
+      assignee.uyushma_id ?? null,
+      stamp,
+    );
 
-  await run(
-    "INSERT INTO task_events (task_id, user_id, action, comment, created_at) VALUES (?,?,'YARATILDI',?,?)",
-    taskId,
-    author.id,
-    "AI taklifi asosida, tasdiqlangan",
-    stamp,
-  );
+    await q.run(
+      `INSERT INTO task_stages (task_id, position, to_user_id, reviewer_user_id,
+                                instruction, status, created_at)
+       VALUES (?,1,?,NULL,NULL,'YANGI',?)`,
+      newId,
+      assignee.id,
+      stamp,
+    );
+
+    await q.run(
+      "INSERT INTO task_events (task_id, user_id, action, comment, created_at, stage_position) VALUES (?,?,'YARATILDI',?,?,1)",
+      newId,
+      author.id,
+      "AI taklifi asosida, tasdiqlangan",
+      stamp,
+    );
+
+    return newId;
+  });
 
   publish(author.id, assignee.id);
   await notify({

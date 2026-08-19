@@ -131,12 +131,22 @@ export async function weeklyReport(offset = 0): Promise<WeeklyReport> {
        (SELECT COUNT(*) FROM task_events e
           WHERE e.user_id = u.id AND e.action = 'TOPSHIRILDI'
             AND e.created_at >= ? AND e.created_at < ?) AS submitted,
-       -- Approved work is credited to the executor, though the author files it.
+       -- Approved work is credited to the executor, though the author files
+       -- it, and to the executor of the STAGE the event belongs to: once a
+       -- chain moves on, t.to_user_id names the next person, and the week
+       -- would hand one persons work to another. COALESCE covers every row
+       -- written before stages existed, where stage_position is NULL.
+       -- (No apostrophes in here: toPlaceholders() tracks quotes character by
+       -- character and cannot tell a comment from a string literal.)
        (SELECT COUNT(*) FROM task_events e JOIN tasks t ON t.id = e.task_id
-          WHERE t.to_user_id = u.id AND e.action = 'TASDIQLANDI'
+          LEFT JOIN task_stages s ON s.task_id = t.id AND s.position = e.stage_position
+          WHERE COALESCE(s.to_user_id, t.to_user_id) = u.id
+            AND e.action IN ('TASDIQLANDI','BOSQICH_TASDIQLANDI')
             AND e.created_at >= ? AND e.created_at < ?) AS done,
        (SELECT COUNT(*) FROM task_events e JOIN tasks t ON t.id = e.task_id
-          WHERE t.to_user_id = u.id AND e.action = 'QAYTARILDI'
+          LEFT JOIN task_stages s ON s.task_id = t.id AND s.position = e.stage_position
+          WHERE COALESCE(s.to_user_id, t.to_user_id) = u.id
+            AND e.action = 'QAYTARILDI'
             AND e.created_at >= ? AND e.created_at < ?) AS returned,
        (SELECT COUNT(*) FROM task_events e
           WHERE e.user_id = u.id AND e.action = 'TASDIQLANDI'
@@ -163,7 +173,9 @@ export async function weeklyReport(offset = 0): Promise<WeeklyReport> {
   const totals = (await get<Omit<WeeklyTotals, "completion" | "active">>(
     `SELECT
        (SELECT COUNT(*) FROM tasks WHERE created_at >= ? AND created_at < ?) AS created,
-       (SELECT COUNT(*) FROM task_events WHERE action = 'TASDIQLANDI'
+       -- Both codes: a handover is a stage finished, and leaving it out
+       -- would make the organisation total undercount real work.
+       (SELECT COUNT(*) FROM task_events WHERE action IN ('TASDIQLANDI','BOSQICH_TASDIQLANDI')
           AND created_at >= ? AND created_at < ?) AS done,
        (SELECT COUNT(*) FROM task_events WHERE action = 'TOPSHIRILDI'
           AND created_at >= ? AND created_at < ?) AS submitted,
