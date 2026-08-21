@@ -99,6 +99,14 @@ export async function allConversations(): Promise<ConversationSummary[]> {
               COUNT(*) AS total,
               MAX(id) AS last_id
          FROM messages
+        -- Group messages carry a group_id and no recipient. LEAST and
+        -- GREATEST skip a NULL rather than propagating it, so one of those
+        -- rows folds into the pair (sender, sender) and shows up here as a
+        -- person talking to themselves — a thread the panel then refuses to
+        -- open, because writing to yourself is not allowed anywhere else.
+        -- SQLite's MIN/MAX returned NULL and the JOIN quietly dropped it;
+        -- saying what we mean works in both.
+        WHERE to_user_id IS NOT NULL
         GROUP BY a, b
      )
      SELECT p.a, p.b, p.total, p.last_id,
