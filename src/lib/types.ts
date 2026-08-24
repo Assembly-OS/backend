@@ -104,6 +104,12 @@ export interface Task {
   accepted_at: string | null;
   submitted_at: string | null;
   closed_at: string | null;
+  /** Weekly errand or long-running work. */
+  scope: TaskScope;
+  /** Storage key of the file handed in with the result, when there was one. */
+  result_file_key: string | null;
+  result_file_name: string | null;
+  result_file_size: number | null;
   /** Which stage of the chain this row currently mirrors. 1 on a plain task. */
   current_stage: number;
   /** How many stages the chain has. 1 on a plain task. */
@@ -204,6 +210,15 @@ export const MANAGER_ROLES: Role[] = [
   "BOLIM_RAHBARI",
   "AI_LAB",
 ];
+
+/**
+ * Weekly work and long work read differently and are planned differently: an
+ * errand due Friday and a programme running to December do not belong in one
+ * list. Two values, because a third would need somebody to decide what it
+ * means.
+ */
+export const TASK_SCOPES = ["HAFTALIK", "UMUMIY"] as const;
+export type TaskScope = (typeof TASK_SCOPES)[number];
 
 export function isManager(role: Role): boolean {
   return MANAGER_ROLES.includes(role);

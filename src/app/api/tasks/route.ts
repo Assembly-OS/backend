@@ -5,7 +5,7 @@ import { publish } from "@/lib/events";
 import { notifyBot } from "@/lib/notify-bot";
 import { assignableUsers } from "@/lib/queries";
 import { id, oneOf, str } from "@/lib/validate";
-import { PRIORITIES, type User } from "@/lib/types";
+import { PRIORITIES, TASK_SCOPES, type User } from "@/lib/types";
 
 /** Eight people is already an unusual chain; past that it is a process, not a
  *  task, and the form would be unreadable on a 360px screen. */
@@ -88,6 +88,9 @@ export async function POST(request: Request) {
     first.toUserId,
   ))!;
   const priority = oneOf(body.priority, PRIORITIES, "ORTA");
+  // Weekly unless the author says otherwise: most assignments are errands,
+  // and defaulting the other way would file every one of them under long work.
+  const scope = oneOf(body.scope, TASK_SCOPES, "HAFTALIK");
   const description = str(body.description, 4000);
   const deadline = str(body.deadline, 20);
   const loyihaId = body.loyihaId == null ? null : id(body.loyihaId);
@@ -112,9 +115,9 @@ export async function POST(request: Request) {
     // concurrent creates can share one, and the read-back could then find either.
     const newId = await q.insert(
       `INSERT INTO tasks (code, title, description, from_user_id, to_user_id, to_department,
-                          priority, status, deadline, loyiha_id, uyushma_id, created_at,
+                          priority, status, deadline, loyiha_id, uyushma_id, scope, created_at,
                           current_stage, stage_count, reviewer_user_id)
-       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,?,1,?,?)`,
+       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,?,?,1,?,?)`,
       code,
       title,
       description,
@@ -125,6 +128,7 @@ export async function POST(request: Request) {
       deadline,
       loyihaId,
       assignee.uyushma_id ?? null,
+      scope,
       stamp,
       chain.length,
       reviewerOf(0),

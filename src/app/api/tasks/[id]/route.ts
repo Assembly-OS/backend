@@ -4,6 +4,8 @@ import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { notifyBot } from "@/lib/notify-bot";
 import { authorizeTransition, STAGE_STARTED } from "@/lib/task-machine";
+import { MAX_BYTES, safeName, store } from "@/lib/uploads";
+import { str } from "@/lib/validate";
 import type { Task } from "@/lib/types";
 
 const ERROR_STATUS = { BAD_ACTION: 400, FORBIDDEN: 403, BAD_STATE: 409 } as const;
@@ -27,10 +29,38 @@ export async function POST(
 
   const { id } = await params;
   const taskId = Number(id);
-  const { action, comment } = (await request.json()) as {
-    action?: string;
-    comment?: string;
-  };
+  /**
+   * Two shapes, one action. Handing in a result may carry a file, and a file
+   * cannot travel as JSON; everything else is a bare verb. Reading both here
+   * keeps the submission atomic — the alternative is uploading first and
+   * transitioning second, which can leave a file attached to nothing when the
+   * second call never happens.
+   */
+  let action: string | undefined;
+  let comment: string | undefined;
+  let upload: File | null = null;
+
+  if ((request.headers.get("content-type") ?? "").includes("multipart/")) {
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      return NextResponse.json({ error: "BAD_FORM" }, { status: 400 });
+    }
+    action = str(form.get("action"), 20) ?? undefined;
+    comment = str(form.get("comment"), 4000) ?? undefined;
+    const candidate = form.get("file");
+    if (candidate instanceof File && candidate.size > 0) upload = candidate;
+  } else {
+    ({ action, comment } = (await request.json()) as {
+      action?: string;
+      comment?: string;
+    });
+  }
+
+  if (upload && upload.size > MAX_BYTES.file) {
+    return NextResponse.json({ error: "TOO_LARGE" }, { status: 413 });
+  }
 
   const task = await get<Task>("SELECT * FROM tasks WHERE id = ?", taskId);
   if (!task) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
@@ -46,6 +76,23 @@ export async function POST(
   const stamp = now();
   const text = comment?.trim() || null;
   const stage = task.current_stage;
+
+  /**
+   * Written after the transition is authorised and before it is applied. The
+   * other order would put bytes on disk for a request the state machine was
+   * about to refuse.
+   */
+  let stored: { key: string; name: string; size: number } | null = null;
+  if (upload && action === "submit") {
+    const name = upload.name || "natija";
+    const written = store(
+      new Uint8Array(await upload.arrayBuffer()),
+      "file",
+      upload.type || "application/octet-stream",
+      safeName(name, "file"),
+    );
+    stored = { key: written.key, name: name.slice(0, 200), size: written.size };
+  }
 
   /**
    * Every write goes through one transaction, chain or not.
@@ -158,6 +205,17 @@ export async function POST(
       values.push(stamp, text);
       stageSets.push("submitted_at = ?", "result_comment = ?");
       stageValues.push(stamp, text);
+
+      if (stored) {
+        sets.push("result_file_key = ?", "result_file_name = ?", "result_file_size = ?");
+        values.push(stored.key, stored.name, stored.size);
+        stageSets.push("result_file_key = ?", "result_file_name = ?", "result_file_size = ?");
+        stageValues.push(stored.key, stored.name, stored.size);
+      }
+    }
+    if (action === "return") {
+      // The returned work keeps its file: the reviewer asked for a change, not
+      // for the attachment to be thrown away and fetched again.
     }
     if (action === "approve" || action === "reject") {
       sets.push("closed_at = ?");

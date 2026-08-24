@@ -229,21 +229,30 @@ export async function subordinates(userId: number): Promise<User[]> {
 export async function assignableUsers(user: User): Promise<User[]> {
   if (user.role === "RAIS") {
     return await all<User>(
-      "SELECT * FROM users WHERE id != ? AND is_active = 1 ORDER BY role, full_name",
-      user.id,
+      "SELECT * FROM users WHERE is_active = 1 ORDER BY role, full_name",
     );
   }
   if (user.role === "ISHCHI") {
-    // Staff may only report upward, never assign.
-    return [];
+    // Staff still may not hand work to anyone else. Themselves is not handing
+    // work to anyone — it is writing down what they are already doing.
+    return await all<User>(
+      "SELECT * FROM users WHERE id = ? AND is_active = 1",
+      user.id,
+    );
   }
-  // Heads: own staff, plus peer departments and association / project leads.
+  // Heads: own staff, peer departments, association and project leads — and
+  // themselves. Somebody whose work is entirely their own had no way to record
+  // it: the chairman's assistant received nothing from anyone, so the execute
+  // page stayed empty and there was never a result to submit.
   return await all<User>(
     `SELECT * FROM users
-     WHERE is_active = 1 AND id != ?
-       AND (manager_id = ?
+     WHERE is_active = 1
+       AND (id = ?
+            OR manager_id = ?
             OR role IN ('BOLIM_RAHBARI','AI_LAB','UYUSHMA_RAISI','LOYIHA_RAHBARI'))
-     ORDER BY CASE WHEN manager_id = ? THEN 0 ELSE 1 END, role, full_name`,
+     ORDER BY CASE WHEN id = ? THEN 0 WHEN manager_id = ? THEN 1 ELSE 2 END,
+              role, full_name`,
+    user.id,
     user.id,
     user.id,
     user.id,

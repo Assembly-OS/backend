@@ -626,6 +626,22 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS current_stage    INTEGER NOT NULL DEF
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stage_count      INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reviewer_user_id INTEGER REFERENCES users(id);
 
+-- Weekly work and long work are different things to look at, and the platform
+-- had one list for both: a project running to December sat among errands due
+-- on Friday, and neither could be read without the other in the way.
+-- 'HAFTALIK' is the default because most assignments are the short kind, and
+-- because every row that already exists is one of those.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'HAFTALIK';
+
+-- The result a person hands in can now carry a file. The key is the same
+-- storage key an attachment uses; the name is kept so a download has one.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result_file_key  TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result_file_name TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result_file_size INTEGER;
+ALTER TABLE task_stages ADD COLUMN IF NOT EXISTS result_file_key  TEXT;
+ALTER TABLE task_stages ADD COLUMN IF NOT EXISTS result_file_name TEXT;
+ALTER TABLE task_stages ADD COLUMN IF NOT EXISTS result_file_size INTEGER;
+
 -- К какому этапу относится запись журнала. NULL у всех старых строк —
 -- отчёты обязаны читать её через COALESCE, см. reports.ts.
 ALTER TABLE task_events ADD COLUMN IF NOT EXISTS stage_position INTEGER;
