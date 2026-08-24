@@ -1,3 +1,4 @@
+import { seesEverything } from "./oversight";
 import type { User } from "./types";
 
 /**
@@ -23,16 +24,10 @@ import type { User } from "./types";
 
 export type CrmRole = "admin" | "manager" | "employee";
 
-const ASSISTANT_LOGINS = (
-  process.env.CRM_ADMIN_LOGINS ?? "muslimbek.komiljonov"
-)
-  .split(",")
-  .map((login) => login.trim().toLowerCase())
-  .filter(Boolean);
-
 export function crmRole(user: User): CrmRole {
-  if (user.role === "RAIS" || ASSISTANT_LOGINS.includes(user.login.toLowerCase()))
-    return "admin";
+  // The same chairman-and-assistant pair the rest of the platform uses; the
+  // list of logins lives in lib/oversight.ts so there is only one of it.
+  if (seesEverything(user)) return "admin";
   if (user.role === "BOLIM_RAHBARI" || user.role === "LOYIHA_RAHBARI")
     return "manager";
   return "employee";

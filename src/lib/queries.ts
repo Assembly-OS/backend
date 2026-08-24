@@ -1,4 +1,5 @@
 import { all, get, now, run } from "./pg";
+import { seesEverything } from "./oversight";
 import { isManager } from "./types";
 import type {
   MessageKind,
@@ -227,7 +228,11 @@ export async function subordinates(userId: number): Promise<User[]> {
 
 /** Who this user is allowed to hand an assignment to. */
 export async function assignableUsers(user: User): Promise<User[]> {
-  if (user.role === "RAIS") {
+  // The chairman, and whoever acts as his hands, may hand work to anyone. For
+  // the assistant that is the whole point of the post: he is asked to place
+  // work across the Assembly, and a list of heads only let him reach five
+  // people out of fourteen.
+  if (seesEverything(user)) {
     return await all<User>(
       "SELECT * FROM users WHERE is_active = 1 ORDER BY role, full_name",
     );
