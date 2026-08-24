@@ -59,6 +59,32 @@ export function weekBounds(offset = 0): WeekBounds {
   };
 }
 
+/**
+ * The first of a month 00:00 to the first of the next, in the same local time
+ * the weekly bounds use and for the same reason.
+ *
+ * Returns the identical shape, because the report itself only ever reads
+ * `from` and `to`: a month is not a different report, it is the same one over
+ * a longer stretch. `0` is this month, `-1` the one before.
+ */
+export function monthBounds(offset = 0): WeekBounds {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+
+  const MONTHS = [
+    "yanvar", "fevral", "mart", "aprel", "may", "iyun",
+    "iyul", "avgust", "sentabr", "oktabr", "noyabr", "dekabr",
+  ];
+
+  return {
+    from: stamp(start),
+    to: stamp(end),
+    label: `${MONTHS[start.getMonth()]} ${start.getFullYear()}`,
+    offset,
+  };
+}
+
 export interface WeeklyRow {
   id: number;
   login: string;
@@ -109,8 +135,16 @@ export interface WeeklyReport {
  * rather than a pile of joins: each metric reads a different table with a
  * different predicate, and a join fan-out would multiply the counts.
  */
-export async function weeklyReport(offset = 0): Promise<WeeklyReport> {
-  const week = weekBounds(offset);
+export async function weeklyReport(
+  offset = 0,
+  /**
+   * Which stretch to count over. Weeks by default, because that is what the
+   * bot sends every Monday; a month is the same figures over a longer one, so
+   * it arrives as bounds rather than as a second copy of this function.
+   */
+  period: "week" | "month" = "week",
+): Promise<WeeklyReport> {
+  const week = period === "month" ? monthBounds(offset) : weekBounds(offset);
   const { from, to } = week;
   // Postgres has no date('now'); the deadline column is TEXT 'YYYY-MM-DD', so
   // today arrives from JS in the same shape and compares lexicographically.
@@ -219,10 +253,14 @@ export async function weeklyReport(offset = 0): Promise<WeeklyReport> {
  * platform's default language, and deliberately short: a phone summary that
  * points at the full table on the site rather than reproducing it.
  */
-export function renderWeeklyText(report: WeeklyReport, platformUrl = ""): string {
+export function renderWeeklyText(
+  report: WeeklyReport,
+  platformUrl = "",
+  period: "week" | "month" = "week",
+): string {
   const { totals, week } = report;
   const lines: string[] = [
-    `📊 <b>Haftalik hisobot</b>`,
+    `📊 <b>${period === "month" ? "Oylik" : "Haftalik"} hisobot</b>`,
     `<i>${week.label}</i>`,
     "",
     `Yangi topshiriqlar: <b>${totals.created}</b>`,

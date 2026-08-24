@@ -31,11 +31,19 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
   }
 
-  const report = await weeklyReport(offset);
+  // `?period=month` counts over a calendar month instead of a week. Same
+  // route, because it is the same report: a second endpoint would be two
+  // copies of the auth, the offset parsing and the two output shapes.
+  const period = params.get("period") === "month" ? "month" : "week";
+  const report = await weeklyReport(offset, period);
 
   if (format === "text") {
     return NextResponse.json({
-      text: renderWeeklyText(report, process.env.PLATFORM_PUBLIC_URL ?? ""),
+      text: renderWeeklyText(
+        report,
+        process.env.PLATFORM_PUBLIC_URL ?? "",
+        period,
+      ),
       week: report.week,
       // Who should receive it: everyone who commands a vertical and has
       // linked Telegram. The bot resolves nothing itself.
