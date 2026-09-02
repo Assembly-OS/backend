@@ -19,8 +19,9 @@ import type { User } from "./types";
  * work somewhere, and a view of five heads out of fourteen answers neither.
  *
  * What it does not open: the administration panel, which has its own account
- * and its own door, and withdrawing an assignment somebody else sent, which
- * remains the chairman's.
+ * and its own door — staff administration reaches the platform separately,
+ * see `canManageStaff` — and withdrawing an assignment somebody else sent,
+ * which remains the chairman's.
  */
 const ASSISTANT_LOGINS = (
   process.env.CRM_ADMIN_LOGINS ?? "muslimbek.komiljonov"
@@ -36,4 +37,21 @@ export function isAssistant(user: User): boolean {
 /** The chairman's own view of the Assembly, and his assistant's. */
 export function seesEverything(user: User): boolean {
   return user.role === "RAIS" || isAssistant(user);
+}
+
+/**
+ * Staff administration: adding a colleague, issuing a login and a password,
+ * correcting a title, switching access off.
+ *
+ * The `/admin` panel could always do this, but it is a locked cupboard whose
+ * key lives in the server's environment — meant for recovering the install,
+ * not for the Tuesday morning when somebody joins. Onboarding is ordinary
+ * work, and it belongs with the two people who actually do it.
+ *
+ * Separate from `seesEverything` only in name, and deliberately: the call
+ * sites read as what they permit, and if issuing credentials ever needs a
+ * narrower list than seeing the figures, this is the seam to narrow.
+ */
+export function canManageStaff(user: User): boolean {
+  return seesEverything(user);
 }

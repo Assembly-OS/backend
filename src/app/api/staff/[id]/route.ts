@@ -1,19 +1,23 @@
 import { NextResponse } from "next/server";
-import { hasAdminSession } from "@/lib/admin-auth";
+import { currentUser } from "@/lib/session";
+import { canManageStaff } from "@/lib/oversight";
 import { deleteStaffAccount, updateStaffAccount } from "@/lib/staff-admin";
 import { id as parseId } from "@/lib/validate";
 
 /**
- * Edits or removes one staff account — see `lib/staff-admin.ts` for what that
- * means and what it refuses. The administrator is not a member of staff, so
- * there is no "self" to protect here: null is passed for the actor.
+ * Editing a colleague's account, issuing a new password, switching access off,
+ * or removing an account created by mistake — from the staff section of the
+ * profile page. The rules, including the refusal to sign yourself out, live in
+ * `lib/staff-admin.ts`.
  */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!(await hasAdminSession()))
-    return NextResponse.json({ error: "AUTH" }, { status: 401 });
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
+  if (!canManageStaff(user))
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const targetId = parseId((await params).id);
   if (!targetId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
@@ -22,7 +26,7 @@ export async function PATCH(
   const { status, body: payload } = await updateStaffAccount(
     targetId,
     body,
-    null,
+    user.id,
   );
   return NextResponse.json(payload, { status });
 }
@@ -31,12 +35,14 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!(await hasAdminSession()))
-    return NextResponse.json({ error: "AUTH" }, { status: 401 });
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
+  if (!canManageStaff(user))
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const targetId = parseId((await params).id);
   if (!targetId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const { status, body } = await deleteStaffAccount(targetId, null);
+  const { status, body } = await deleteStaffAccount(targetId, user.id);
   return NextResponse.json(body, { status });
 }
