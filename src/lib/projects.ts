@@ -1,5 +1,6 @@
 import { get } from "./pg";
 import { id as parseId, oneOf, str } from "./validate";
+import { PROJECT_STATUSES } from "./project-vocab";
 
 /**
  * Shared shaping for the project admin routes. Both create and edit accept the
@@ -11,29 +12,16 @@ import { id as parseId, oneOf, str } from "./validate";
 export const PROJECT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,15}$/;
 
 /**
- * Where a project stands.
- *
- * `FAOL` and `YAKUNLANMOQDA` are the original pair and keep their exact
- * meaning — every row already in the register carries one of them, and
- * renaming either would have rewritten history to make a list look tidier.
- * The other three are what running a project as a workspace turned out to
- * need: work that has not started, work parked on somebody else, and work
- * that is finished rather than finishing.
- *
- * Unknown input falls back to `FAOL` rather than being stored, so a status no
- * screen can label never reaches the database.
+ * Re-exported from `project-vocab`, which holds no database import: the
+ * "new project" form is a Client Component and needs the status list, and
+ * importing it from this module dragged the Postgres driver into the browser
+ * bundle. Server code keeps importing from here, as it always did.
  */
-export const PROJECT_STATUSES = [
-  "REJA",
-  "FAOL",
-  "PAUZA",
-  "YAKUNLANMOQDA",
-  "YAKUNLANDI",
-] as const;
-export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
-
-/** A project carries the same four priorities an assignment does. */
-export const PROJECT_PRIORITIES = ["PAST", "ORTA", "YUQORI", "KRITIK"] as const;
+export {
+  PROJECT_STATUSES,
+  PROJECT_PRIORITIES,
+  type ProjectStatus,
+} from "./project-vocab";
 
 export interface ProjectFields {
   code: string | null;

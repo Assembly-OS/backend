@@ -1,6 +1,12 @@
 import { all, get, insert, now, run, tx } from "./pg";
 import { today } from "./crm";
 import { str } from "./validate";
+import {
+  entryKind,
+  threadKind,
+  type EntryKind,
+  type ThreadKind,
+} from "./project-vocab";
 
 /**
  * Projects as workspaces, and the threads that hold their history.
@@ -36,35 +42,22 @@ import { str } from "./validate";
 /* Vocabulary                                                          */
 /* ------------------------------------------------------------------ */
 
-/** What a thread is about. Decides an icon; a thread is otherwise a thread. */
-export const THREAD_KINDS = ["ORG", "DIRECTION", "INTERNAL"] as const;
-export type ThreadKind = (typeof THREAD_KINDS)[number];
-
 /**
- * What kind of record an entry is.
+ * Re-exported from `project-kinds`, which holds no database import.
  *
- * The kinds are not decoration: they are what lets a year of a thread be
- * skimmed. "When did we last actually meet them" is answered by the MEETING
- * marks alone, and no amount of reading paragraphs replaces that.
+ * The split exists because the "new thread" form is a Client Component and
+ * needs `THREAD_KINDS`; importing it from this module dragged the Postgres
+ * driver into the browser bundle and broke the build. Server code keeps
+ * importing everything from here, as it always did.
  */
-export const ENTRY_KINDS = [
-  "NOTE",
-  "MEETING",
-  "AGREEMENT",
-  "FILE",
-  "LINK",
-] as const;
-export type EntryKind = (typeof ENTRY_KINDS)[number];
-
-export function threadKind(value: unknown): ThreadKind {
-  return THREAD_KINDS.includes(value as ThreadKind)
-    ? (value as ThreadKind)
-    : "ORG";
-}
-
-export function entryKind(value: unknown): EntryKind {
-  return ENTRY_KINDS.includes(value as EntryKind) ? (value as EntryKind) : "NOTE";
-}
+export {
+  THREAD_KINDS,
+  ENTRY_KINDS,
+  threadKind,
+  entryKind,
+  entryDay,
+} from "./project-vocab";
+export type { ThreadKind, EntryKind } from "./project-vocab";
 
 /* ------------------------------------------------------------------ */
 /* Shapes                                                              */
@@ -135,20 +128,6 @@ export interface EntryRow {
   agreement_deadline: string | null;
   edited_at: string | null;
   created_at: string;
-}
-
-/**
- * The day an entry belongs to in the journal.
- *
- * `occurred_on` when the writer supplied one, otherwise the day it was
- * written. Both are already Assembly-time calendar days by the time they are
- * stored, so this is a choice, not a conversion.
- */
-export function entryDay(entry: {
-  occurred_on: string | null;
-  created_at: string;
-}): string {
-  return entry.occurred_on ?? entry.created_at.slice(0, 10);
 }
 
 /* ------------------------------------------------------------------ */
