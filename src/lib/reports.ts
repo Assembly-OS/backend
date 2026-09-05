@@ -191,8 +191,13 @@ export async function weeklyReport(
             AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
        (SELECT COUNT(*) FROM messages m
           WHERE m.from_user_id = u.id AND m.created_at >= ? AND m.created_at < ?) AS messages,
+       -- KORILDI is excluded on purpose. Opening an assignment is a signal
+       -- worth recording, but it is not work: counting it here would let
+       -- somebody who read their inbox and did nothing register a week's
+       -- activity, which is the opposite of what this column is read for.
        (SELECT COUNT(*) FROM task_events e
-          WHERE e.user_id = u.id AND e.created_at >= ? AND e.created_at < ?) AS actions
+          WHERE e.user_id = u.id AND e.action <> 'KORILDI'
+            AND e.created_at >= ? AND e.created_at < ?) AS actions
      FROM users u
      WHERE u.is_active = 1
      ORDER BY done DESC, submitted DESC, u.full_name`,
