@@ -11,12 +11,29 @@ import { id as parseId, oneOf, str } from "./validate";
 export const PROJECT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,15}$/;
 
 /**
- * `FAOL` is the working default and the only value the statistics page knows
- * how to badge; `YAKUNLANMOQDA` marks a project on its way out. Anything else
- * would render as an unlabelled status, so unknown input falls back rather
- * than being stored.
+ * Where a project stands.
+ *
+ * `FAOL` and `YAKUNLANMOQDA` are the original pair and keep their exact
+ * meaning — every row already in the register carries one of them, and
+ * renaming either would have rewritten history to make a list look tidier.
+ * The other three are what running a project as a workspace turned out to
+ * need: work that has not started, work parked on somebody else, and work
+ * that is finished rather than finishing.
+ *
+ * Unknown input falls back to `FAOL` rather than being stored, so a status no
+ * screen can label never reaches the database.
  */
-export const PROJECT_STATUSES = ["FAOL", "YAKUNLANMOQDA"] as const;
+export const PROJECT_STATUSES = [
+  "REJA",
+  "FAOL",
+  "PAUZA",
+  "YAKUNLANMOQDA",
+  "YAKUNLANDI",
+] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+/** A project carries the same four priorities an assignment does. */
+export const PROJECT_PRIORITIES = ["PAST", "ORTA", "YUQORI", "KRITIK"] as const;
 
 export interface ProjectFields {
   code: string | null;

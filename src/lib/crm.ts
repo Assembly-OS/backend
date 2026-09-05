@@ -407,6 +407,11 @@ export interface AgreementInput {
   note?: string | null;
   source?: string;
   created_by?: number | null;
+  /** The project this commitment belongs to, when it came out of one. */
+  loyiha_id?: number | null;
+  /** The project thread it was recorded in, so the journal can be reached
+   *  back from the agreement and not only forwards from the entry. */
+  thread_id?: number | null;
 }
 
 export async function createAgreement(input: AgreementInput): Promise<number> {
@@ -414,8 +419,9 @@ export async function createAgreement(input: AgreementInput): Promise<number> {
   const id = await insert(
     `INSERT INTO agreements
        (company_id, meeting_id, description, owner_user_id, owner_name,
-        deadline, status, priority, note, source, created_by, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        deadline, status, priority, note, source, created_by, created_at,
+        loyiha_id, thread_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     input.company_id ?? null,
     input.meeting_id ?? null,
     input.description.slice(0, 1000),
@@ -428,6 +434,8 @@ export async function createAgreement(input: AgreementInput): Promise<number> {
     input.source ?? "manual",
     input.created_by ?? null,
     now(),
+    input.loyiha_id ?? null,
+    input.thread_id ?? null,
   );
 
   if (input.owner_user_id) {

@@ -658,3 +658,134 @@ SELECT id, 1, to_user_id, NULL, status,
        result_comment, accepted_at, submitted_at, closed_at, created_at
   FROM tasks
 ON CONFLICT (task_id, position) DO NOTHING;
+
+-- =====================================================================
+-- Projects as workspaces, and the threads that carry their history.
+--
+-- `loyihalar` was a register: a code, a budget, a percentage, a row on the
+-- public site. What it could never answer is the question people walk up to
+-- a colleague to ask — "what is happening with Smart City?" — because the
+-- answer lived in four heads, a chat, and somebody's notebook.
+--
+-- A project is now a workspace holding one thread per counterpart: UNIDO, LG,
+-- Huawei, the ministry, the internal team. A thread is a work journal, not a
+-- conversation: entries are dated records of what happened, appended in the
+-- order it happened, and read months later to rebuild the whole relationship.
+--
+-- The distinction from `messages` is deliberate and load-bearing. Chat is
+-- people talking; a thread entry is the record that survives them. Chat is
+-- read once and scrolled past, so it stores a sent time and nothing else.
+-- An entry stores the day the thing HAPPENED, which is often not the day
+-- somebody got round to writing it down, and that is the whole difference
+-- between a log and a memory.
+--
+-- Nothing here replaces meetings, agreements or tasks. Those tables keep
+-- their meaning and their queries; an entry points at the one it produced,
+-- so "we agreed X" is both a line in the story and a row with a deadline.
+-- =====================================================================
+
+-- ORTA matches the task default: one priority vocabulary in the platform,
+-- not two that need translating at every boundary.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'ORTA';
+-- When work actually began, as opposed to when somebody created the row.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS started_at TEXT;
+-- Free text on purpose. "Waiting on their legal review" is a real stage and
+-- no enum written in advance will contain it.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS stage TEXT;
+
+-- One counterpart inside a project: an organisation, a workstream, or the
+-- team itself. Unlimited per project, by design — a programme that touches
+-- eleven ministries needs eleven threads and no ceremony to open the twelfth.
+CREATE TABLE IF NOT EXISTS project_threads (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project_id  INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  -- The CRM company this thread is about, where it is one. Kept nullable and
+  -- ON DELETE SET NULL: "Internal team" and "Tender preparation" are threads
+  -- with no company, and losing a company must not take its history with it.
+  company_id  INTEGER REFERENCES partners(id) ON DELETE SET NULL,
+  -- ORG | DIRECTION | INTERNAL. Decides the icon and nothing else; a thread
+  -- is a thread.
+  kind        TEXT NOT NULL DEFAULT 'ORG',
+  -- One line answering "where does this stand right now", written by a person
+  -- and shown in the sidebar. Not generated, not derived: the last entry is
+  -- frequently a document upload and says nothing about the state of play.
+  summary     TEXT,
+  is_archived INTEGER NOT NULL DEFAULT 0,
+  created_by  INTEGER NOT NULL REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  -- Denormalised so the project page can order and date a sidebar of forty
+  -- threads without forty subqueries. Written in the same transaction as the
+  -- entry that moves it.
+  last_entry_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_threads_project
+  ON project_threads(project_id, is_archived, last_entry_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_company ON project_threads(company_id);
+
+-- One dated record in a thread's history.
+CREATE TABLE IF NOT EXISTS thread_entries (
+  id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  thread_id  INTEGER NOT NULL REFERENCES project_threads(id) ON DELETE CASCADE,
+  author_id  INTEGER NOT NULL REFERENCES users(id),
+  -- NOTE | MEETING | AGREEMENT | FILE | LINK. What kind of record this is,
+  -- which is what lets the journal be read as a history rather than a wall.
+  kind       TEXT NOT NULL DEFAULT 'NOTE',
+  body       TEXT NOT NULL DEFAULT '',
+  -- The calendar day the thing happened, in Assembly time. NULL means "the
+  -- day it was written", which is the common case; a filled value is somebody
+  -- recording Tuesday's meeting on Thursday, and the journal must show
+  -- Tuesday or it is not a history.
+  occurred_on TEXT,
+  -- Marked as worth finding again.
+  is_pinned  INTEGER NOT NULL DEFAULT 0,
+  -- An attachment, using the same storage key an ordinary attachment uses.
+  file_key   TEXT,
+  file_name  TEXT,
+  file_size  INTEGER,
+  link_url   TEXT,
+  -- What this entry produced, where it produced something. The entry is the
+  -- story; these are the rows that carry a deadline and chase themselves.
+  meeting_id   INTEGER REFERENCES meetings(id) ON DELETE SET NULL,
+  agreement_id INTEGER REFERENCES agreements(id) ON DELETE SET NULL,
+  task_id      INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  edited_at  TEXT,
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_entries_thread ON thread_entries(thread_id, id);
+CREATE INDEX IF NOT EXISTS idx_entries_pinned
+  ON thread_entries(thread_id, id DESC) WHERE is_pinned = 1;
+
+-- Who is working this thread. The project's owner answers for the whole of
+-- it; these are the people to notify about this counterpart in particular.
+CREATE TABLE IF NOT EXISTS thread_members (
+  thread_id  INTEGER NOT NULL REFERENCES project_threads(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  PRIMARY KEY (thread_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_thread_members_user ON thread_members(user_id);
+
+-- The project a meeting, an agreement or a task belongs to. All nullable and
+-- staying nullable: plenty of each is a one-off that belongs to a company and
+-- to no project, and forcing them into one would be a lie. `tasks.loyiha_id`
+-- has existed since the first release.
+ALTER TABLE meetings   ADD COLUMN IF NOT EXISTS loyiha_id INTEGER;
+ALTER TABLE agreements ADD COLUMN IF NOT EXISTS loyiha_id INTEGER;
+ALTER TABLE agreements ADD COLUMN IF NOT EXISTS thread_id INTEGER;
+
+CREATE INDEX IF NOT EXISTS idx_meetings_project ON meetings(loyiha_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agree_project    ON agreements(loyiha_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_project    ON tasks(loyiha_id, id DESC);
+
+-- When the assignee first opened the assignment.
+--
+-- The one genuinely new state in the task lifecycle: accepted and refused
+-- were always recorded, but "he has not even looked at it yet" was not — and
+-- that is what a manager most needs when nothing has happened, because it
+-- separates somebody ignoring the work from somebody who never saw it.
+-- NULL on every existing row, and NULL is meaningful: not seen.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS seen_at TEXT;
