@@ -773,6 +773,22 @@ const en: Dictionary = {
   "thread.members": "Working on this",
   "thread.noMembers": "nobody yet",
   "thread.addMember": "Add",
+
+  /* --- Loyiha xotirasi: qidiruv va savollar ------------------------- */
+
+  "memory.ask": "Ask",
+  "memory.search": "Search",
+  "memory.placeholder": "Ask a question, or search for a word",
+  "memory.hint": "Answers come only from the records kept here. If they do not cover it, it says so.",
+  "memory.sources": "Sources",
+  "memory.nothing": "Nothing found",
+  "memory.truncated": "There are more records than fit; the answer covers the most recent.",
+  "memory.scopeProject": "across the project",
+  "memory.scopeThread": "in this chat",
+  "memory.NO_KEY": "No AI key is configured — search works, questions do not.",
+  "memory.EMPTY": "Nothing has been recorded here yet.",
+  "memory.REFUSED": "That question was declined.",
+  "memory.ERROR": "Something went wrong",
 };
 
 export default en;

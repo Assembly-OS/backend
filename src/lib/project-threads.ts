@@ -2,6 +2,7 @@ import { all, get, insert, now, run, tx } from "./pg";
 import { today } from "./crm";
 import { str } from "./validate";
 import {
+  entryDay,
   entryKind,
   threadKind,
   type EntryKind,
@@ -722,4 +723,112 @@ export async function declineReason(taskId: number): Promise<string | null> {
     taskId,
   );
   return row?.comment ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Search                                                              */
+/* ------------------------------------------------------------------ */
+
+export interface FoundEntry {
+  id: number;
+  thread_id: number;
+  thread_title: string;
+  kind: EntryKind;
+  body: string;
+  occurred_on: string | null;
+  created_at: string;
+  author_full_name: string;
+}
+
+/**
+ * Finds records by the words in them, inside one project or one thread.
+ *
+ * Every term must appear — `ILIKE` per word, ANDed — because a search for
+ * "UNIDO funding" that returns every mention of funding anywhere in the
+ * project is a search nobody uses twice. Terms match anywhere inside a word,
+ * which is what makes it usable at all in Uzbek and Russian: both inflect
+ * heavily, and "moliyalashtirish" has to be found by typing "moliya".
+ *
+ * This is literal matching and does not pretend otherwise. Finding records by
+ * meaning is what `askMemory` is for; the two are offered side by side
+ * because they fail in opposite directions — search misses a synonym, the
+ * model misses nothing but costs a request.
+ */
+export async function searchEntries(
+  scope: { projectId: number; threadId?: number },
+  query: string,
+  limit = 50,
+): Promise<FoundEntry[]> {
+  const terms = query
+    .trim()
+    .split(/\s+/)
+    .filter((term) => term.length >= 2)
+    .slice(0, 6);
+  if (terms.length === 0) return [];
+
+  const conditions = terms.map(() => "e.body ILIKE ?").join(" AND ");
+  const params: (string | number)[] = [scope.projectId];
+  if (scope.threadId) params.push(scope.threadId);
+  params.push(...terms.map((term) => `%${term}%`), limit);
+
+  return await all<FoundEntry>(
+    `SELECT e.id, e.thread_id, t.title AS thread_title, e.kind, e.body,
+            e.occurred_on, e.created_at, u.full_name AS author_full_name
+       FROM thread_entries e
+       JOIN project_threads t ON t.id = e.thread_id
+       JOIN users u ON u.id = e.author_id
+      WHERE t.project_id = ?${scope.threadId ? " AND e.thread_id = ?" : ""}
+        AND ${conditions}
+      ORDER BY e.id DESC
+      LIMIT ?`,
+    ...params,
+  );
+}
+
+/**
+ * Everything written in a scope, in the order the events happened.
+ *
+ * Three separate orderings meet here and confusing them produces a memory
+ * that answers date questions wrongly.
+ *
+ * The **cap** is taken by id from the newest end: when a scope holds more
+ * than fits, the records worth keeping are the ones most recently written,
+ * and the caller is told the cap bit so the answer can say so.
+ *
+ * The **hand-over** is then sorted by the day each thing HAPPENED, not by
+ * insertion. A meeting held on the 12th and written up on the 20th sits
+ * between the 11th and the 13th, where a reader looking for August expects
+ * it — sorting by id would have filed it after everything typed before it.
+ *
+ * Ties fall back to id, so two records of the same day keep the order they
+ * were written in, which is the only order that exists for them.
+ */
+export async function memoryOf(
+  scope: { projectId: number; threadId?: number },
+  limit = 400,
+): Promise<{ entries: FoundEntry[]; truncated: boolean }> {
+  const params: (string | number)[] = [scope.projectId];
+  if (scope.threadId) params.push(scope.threadId);
+  params.push(limit + 1);
+
+  const rows = await all<FoundEntry>(
+    `SELECT e.id, e.thread_id, t.title AS thread_title, e.kind, e.body,
+            e.occurred_on, e.created_at, u.full_name AS author_full_name
+       FROM thread_entries e
+       JOIN project_threads t ON t.id = e.thread_id
+       JOIN users u ON u.id = e.author_id
+      WHERE t.project_id = ?${scope.threadId ? " AND e.thread_id = ?" : ""}
+      ORDER BY e.id DESC
+      LIMIT ?`,
+    ...params,
+  );
+
+  const truncated = rows.length > limit;
+  const kept = rows.slice(0, limit);
+  kept.sort((a, b) => {
+    const dayA = entryDay(a);
+    const dayB = entryDay(b);
+    return dayA === dayB ? a.id - b.id : dayA < dayB ? -1 : 1;
+  });
+  return { entries: kept, truncated };
 }

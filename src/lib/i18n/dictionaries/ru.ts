@@ -773,6 +773,22 @@ const ru: Dictionary = {
   "thread.members": "Участники",
   "thread.noMembers": "не назначены",
   "thread.addMember": "Добавить",
+
+  /* --- Loyiha xotirasi: qidiruv va savollar ------------------------- */
+
+  "memory.ask": "Спросить",
+  "memory.search": "Найти",
+  "memory.placeholder": "Задайте вопрос или найдите по слову",
+  "memory.hint": "Ответ берётся только из записей, сохранённых здесь. Если в них ответа нет, так и будет сказано.",
+  "memory.sources": "Источники",
+  "memory.nothing": "Ничего не найдено",
+  "memory.truncated": "Записей много — ответ построен по самым недавним.",
+  "memory.scopeProject": "по всему проекту",
+  "memory.scopeThread": "по этому чату",
+  "memory.NO_KEY": "Ключ AI не настроен — поиск работает, вопросы пока нет.",
+  "memory.EMPTY": "Здесь ещё ничего не записано.",
+  "memory.REFUSED": "На этот вопрос ответа не будет.",
+  "memory.ERROR": "Что-то пошло не так",
 };
 
 export default ru;
