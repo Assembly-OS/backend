@@ -41,6 +41,10 @@ export async function POST(request: Request) {
     priority: oneOf(body.priority, PRIORITIES, "ORTA"),
     note: str(body.note, 1000),
     created_by: user.id,
+    // Set when the commitment was recorded inside a project thread, so it can
+    // be found from the project as well as from the company.
+    loyiha_id: parseId(body.loyiha_id),
+    thread_id: parseId(body.thread_id),
   });
   return NextResponse.json({ ok: true, id });
 }

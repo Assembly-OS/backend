@@ -1,5 +1,6 @@
 import { get } from "./pg";
 import { id as parseId, oneOf, str } from "./validate";
+import { PROJECT_STATUSES } from "./project-vocab";
 
 /**
  * Shared shaping for the project admin routes. Both create and edit accept the
@@ -11,12 +12,16 @@ import { id as parseId, oneOf, str } from "./validate";
 export const PROJECT_CODE_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,15}$/;
 
 /**
- * `FAOL` is the working default and the only value the statistics page knows
- * how to badge; `YAKUNLANMOQDA` marks a project on its way out. Anything else
- * would render as an unlabelled status, so unknown input falls back rather
- * than being stored.
+ * Re-exported from `project-vocab`, which holds no database import: the
+ * "new project" form is a Client Component and needs the status list, and
+ * importing it from this module dragged the Postgres driver into the browser
+ * bundle. Server code keeps importing from here, as it always did.
  */
-export const PROJECT_STATUSES = ["FAOL", "YAKUNLANMOQDA"] as const;
+export {
+  PROJECT_STATUSES,
+  PROJECT_PRIORITIES,
+  type ProjectStatus,
+} from "./project-vocab";
 
 export interface ProjectFields {
   code: string | null;
