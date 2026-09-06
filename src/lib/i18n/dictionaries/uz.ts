@@ -749,6 +749,28 @@ const uz = {
   "accept.declined": "Rad etdi",
   "accept.seenNotAccepted": "ko'rgan, qabul qilmagan",
   "accept.notSeenYet": "hali ochmagan",
+
+  /* --- Topshiriq tarixi va eslatma ---------------------------------- */
+
+  "task.remind": "Eslatish",
+  "task.reminded": "Eslatildi",
+  "task.declineReason": "Rad etish sababi",
+  "event.YARATILDI": "Topshiriq berildi",
+  "event.KORILDI": "Ko'rdi",
+  "event.QABUL_QILINDI": "Qabul qildi",
+  "event.RAD_ETILDI": "Rad etdi",
+  "event.ISH_BOSHLANDI": "Ishga kirishdi",
+  "event.TOPSHIRILDI": "Natijani topshirdi",
+  "event.TASDIQLANDI": "Tasdiqlandi",
+  "event.QAYTARILDI": "Qayta ishlashga qaytarildi",
+  "event.BOSQICH_TASDIQLANDI": "Bosqich tasdiqlandi",
+  "event.BOSQICH_BOSHLANDI": "Bosqich boshlandi",
+
+  /* --- Suhbat ishtirokchilari --------------------------------------- */
+
+  "thread.members": "Ishtirokchilar",
+  "thread.noMembers": "belgilanmagan",
+  "thread.addMember": "Qo'shish",
 };
 
 export default uz;

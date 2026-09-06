@@ -751,6 +751,28 @@ const uzc: Dictionary = {
   "accept.declined": "Рад этди",
   "accept.seenNotAccepted": "кўрган, қабул қилмаган",
   "accept.notSeenYet": "ҳали очмаган",
+
+  /* --- Topshiriq tarixi va eslatma ---------------------------------- */
+
+  "task.remind": "Эслатиш",
+  "task.reminded": "Эслатилди",
+  "task.declineReason": "Рад этиш сабаби",
+  "event.YARATILDI": "Топшириқ берилди",
+  "event.KORILDI": "Кўрди",
+  "event.QABUL_QILINDI": "Қабул қилди",
+  "event.RAD_ETILDI": "Рад этди",
+  "event.ISH_BOSHLANDI": "Ишга киришди",
+  "event.TOPSHIRILDI": "Натижани топширди",
+  "event.TASDIQLANDI": "Тасдиқланди",
+  "event.QAYTARILDI": "Қайта ишлашга қайтарилди",
+  "event.BOSQICH_TASDIQLANDI": "Босқич тасдиқланди",
+  "event.BOSQICH_BOSHLANDI": "Босқич бошланди",
+
+  /* --- Suhbat ishtirokchilari --------------------------------------- */
+
+  "thread.members": "Иштирокчилар",
+  "thread.noMembers": "белгиланмаган",
+  "thread.addMember": "Қўшиш",
 };
 
 export default uzc;

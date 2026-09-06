@@ -751,6 +751,28 @@ const en: Dictionary = {
   "accept.declined": "Declined",
   "accept.seenNotAccepted": "seen, not accepted",
   "accept.notSeenYet": "not opened yet",
+
+  /* --- Topshiriq tarixi va eslatma ---------------------------------- */
+
+  "task.remind": "Remind",
+  "task.reminded": "Reminded",
+  "task.declineReason": "Reason for refusing",
+  "event.YARATILDI": "Assigned",
+  "event.KORILDI": "Opened",
+  "event.QABUL_QILINDI": "Accepted",
+  "event.RAD_ETILDI": "Refused",
+  "event.ISH_BOSHLANDI": "Started work",
+  "event.TOPSHIRILDI": "Submitted the result",
+  "event.TASDIQLANDI": "Approved",
+  "event.QAYTARILDI": "Returned for rework",
+  "event.BOSQICH_TASDIQLANDI": "Stage approved",
+  "event.BOSQICH_BOSHLANDI": "Stage started",
+
+  /* --- Suhbat ishtirokchilari --------------------------------------- */
+
+  "thread.members": "Working on this",
+  "thread.noMembers": "nobody yet",
+  "thread.addMember": "Add",
 };
 
 export default en;

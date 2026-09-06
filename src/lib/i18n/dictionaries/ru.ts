@@ -751,6 +751,28 @@ const ru: Dictionary = {
   "accept.declined": "Отказался",
   "accept.seenNotAccepted": "видел, не принял",
   "accept.notSeenYet": "ещё не открыл",
+
+  /* --- Topshiriq tarixi va eslatma ---------------------------------- */
+
+  "task.remind": "Напомнить",
+  "task.reminded": "Напомнили",
+  "task.declineReason": "Причина отказа",
+  "event.YARATILDI": "Поручение выдано",
+  "event.KORILDI": "Открыл",
+  "event.QABUL_QILINDI": "Принял",
+  "event.RAD_ETILDI": "Отказался",
+  "event.ISH_BOSHLANDI": "Начал работу",
+  "event.TOPSHIRILDI": "Сдал результат",
+  "event.TASDIQLANDI": "Утверждено",
+  "event.QAYTARILDI": "Возвращено на доработку",
+  "event.BOSQICH_TASDIQLANDI": "Этап утверждён",
+  "event.BOSQICH_BOSHLANDI": "Этап начат",
+
+  /* --- Suhbat ishtirokchilari --------------------------------------- */
+
+  "thread.members": "Участники",
+  "thread.noMembers": "не назначены",
+  "thread.addMember": "Добавить",
 };
 
 export default ru;

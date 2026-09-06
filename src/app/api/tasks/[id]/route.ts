@@ -3,6 +3,7 @@ import { get, now, tx } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { notifyBot } from "@/lib/notify-bot";
+import { notify } from "@/lib/notifications";
 import { authorizeTransition, STAGE_STARTED } from "@/lib/task-machine";
 import { MAX_BYTES, safeName, store } from "@/lib/uploads";
 import { str } from "@/lib/validate";
@@ -290,6 +291,33 @@ export async function POST(
     user.id,
     task.reviewer_user_id ?? task.from_user_id,
   );
+
+  // A refusal is the one transition the author must not learn about by
+  // happening to have the page open.
+  //
+  // Everything else here moves work forward and shows up wherever the author
+  // next looks. A refusal stops it dead: nobody is doing the thing, and until
+  // somebody is told, nobody knows. `publish` only refreshes a screen that is
+  // already open, so on its own it loses the message to anyone who had closed
+  // the tab — which, for a chairman's assistant handing out twenty
+  // assignments, is most of the time.
+  //
+  // The reason travels with it. "Rejected" prompts a phone call; "rejected —
+  // I have no access to that data" is something the author can act on without
+  // one.
+  if (action === "reject") {
+    const refusal = text ? `: ${text}` : "";
+    await notify({
+      userId: task.from_user_id,
+      kind: "task",
+      title: `${task.code} — ${user.full_name}`,
+      body: `${task.title}${refusal}`,
+      href: "/tasks/assign",
+      entity: "task-reject",
+      entityId: taskId,
+      push: true,
+    });
+  }
 
   return NextResponse.json({ ok: true, status: decision.to });
 }

@@ -122,6 +122,8 @@ export interface EntryRow {
   task_assignee: string | null;
   task_seen_at: string | null;
   task_accepted_at: string | null;
+  /** Who handed the work out — only they may send a reminder. */
+  task_author_id: number | null;
   /** Filled when the entry recorded an agreement. */
   agreement_text: string | null;
   agreement_status: string | null;
@@ -280,6 +282,7 @@ const ENTRY_SELECT = `
          tk.title AS task_title, tk.status AS task_status,
          tk.deadline AS task_deadline, tu.full_name AS task_assignee,
          tk.seen_at AS task_seen_at, tk.accepted_at AS task_accepted_at,
+         tk.from_user_id AS task_author_id,
          ag.description AS agreement_text, ag.status AS agreement_status,
          ag.deadline AS agreement_deadline,
          e.edited_at, e.created_at
@@ -667,4 +670,56 @@ export async function updateProject(
     fields.ownerId,
     id,
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* One assignment's history                                            */
+/* ------------------------------------------------------------------ */
+
+export interface TaskEventRow {
+  id: number;
+  action: string;
+  comment: string | null;
+  created_at: string;
+  actor: string;
+}
+
+/**
+ * What happened to one assignment, and when.
+ *
+ * The journal has always been written — `task_events` records every
+ * transition, and `KORILDI` joined it when "seen" became a state — but until
+ * now nothing read it back. The author could see where an assignment stands
+ * and not how it got there, which is the difference between "he has not
+ * accepted" and "he accepted on Tuesday, I returned it on Wednesday, and it
+ * has been sitting since".
+ *
+ * Ordered forwards, because a history is read forwards.
+ */
+export async function taskHistory(taskId: number): Promise<TaskEventRow[]> {
+  return await all<TaskEventRow>(
+    `SELECT e.id, e.action, e.comment, e.created_at, u.full_name AS actor
+       FROM task_events e
+       JOIN users u ON u.id = e.user_id
+      WHERE e.task_id = ?
+      ORDER BY e.id`,
+    taskId,
+  );
+}
+
+/**
+ * The reason somebody gave for refusing.
+ *
+ * Stored as the comment on the refusal event rather than on the task, because
+ * a task can be refused, reassigned and refused again, and each refusal has
+ * its own reason. The most recent one is what a reader wants.
+ */
+export async function declineReason(taskId: number): Promise<string | null> {
+  const row = await get<{ comment: string | null }>(
+    `SELECT comment FROM task_events
+      WHERE task_id = ? AND action = 'RAD_ETILDI'
+      ORDER BY id DESC LIMIT 1`,
+    taskId,
+  );
+  return row?.comment ?? null;
 }
