@@ -771,6 +771,22 @@ const uz = {
   "thread.members": "Ishtirokchilar",
   "thread.noMembers": "belgilanmagan",
   "thread.addMember": "Qo'shish",
+
+  /* --- Loyiha xotirasi: qidiruv va savollar ------------------------- */
+
+  "memory.ask": "So'rash",
+  "memory.search": "Qidirish",
+  "memory.placeholder": "Savol bering yoki so'z bo'yicha qidiring",
+  "memory.hint": "Javob faqat shu yerga yozilgan yozuvlardan olinadi. Yozuvlarda javob bo'lmasa, shunday deb aytiladi.",
+  "memory.sources": "Manbalar",
+  "memory.nothing": "Hech narsa topilmadi",
+  "memory.truncated": "Yozuvlar ko'p — javob eng so'nggilariga asoslangan.",
+  "memory.scopeProject": "butun loyiha bo'yicha",
+  "memory.scopeThread": "shu suhbat bo'yicha",
+  "memory.NO_KEY": "AI kaliti sozlanmagan — qidiruv ishlaydi, savol berish esa yo'q.",
+  "memory.EMPTY": "Bu yerda hali hech narsa yozilmagan.",
+  "memory.REFUSED": "Bu savolga javob berilmadi.",
+  "memory.ERROR": "Xatolik yuz berdi",
 };
 
 export default uz;

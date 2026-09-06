@@ -773,6 +773,22 @@ const uzc: Dictionary = {
   "thread.members": "Иштирокчилар",
   "thread.noMembers": "белгиланмаган",
   "thread.addMember": "Қўшиш",
+
+  /* --- Loyiha xotirasi: qidiruv va savollar ------------------------- */
+
+  "memory.ask": "Сўраш",
+  "memory.search": "Қидириш",
+  "memory.placeholder": "Савол беринг ёки сўз бўйича қидиринг",
+  "memory.hint": "Жавоб фақат шу ерга ёзилган ёзувлардан олинади. Ёзувларда жавоб бўлмаса, шундай деб айтилади.",
+  "memory.sources": "Манбалар",
+  "memory.nothing": "Ҳеч нарса топилмади",
+  "memory.truncated": "Ёзувлар кўп — жавоб энг сўнггиларига асосланган.",
+  "memory.scopeProject": "бутун лойиҳа бўйича",
+  "memory.scopeThread": "шу суҳбат бўйича",
+  "memory.NO_KEY": "AI калити созланмаган — қидирув ишлайди, савол бериш эса йўқ.",
+  "memory.EMPTY": "Бу ерда ҳали ҳеч нарса ёзилмаган.",
+  "memory.REFUSED": "Бу саволга жавоб берилмади.",
+  "memory.ERROR": "Хатолик юз берди",
 };
 
 export default uzc;
