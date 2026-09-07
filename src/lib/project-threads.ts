@@ -271,6 +271,34 @@ export async function archiveThread(
   );
 }
 
+/**
+ * Removes a thread outright, with everything written in it.
+ *
+ * This sits beside `archiveThread` and is deliberately the harder of the two
+ * to reach. Archiving is how a finished counterpart leaves the sidebar and it
+ * keeps every word; deleting is for the thread that should never have existed
+ * — a duplicate, a typo, a test — where there is no history to lose and
+ * archiving only makes the archive longer.
+ *
+ * Entries and members carry ON DELETE CASCADE and go with it. What those
+ * entries *produced* does not: an agreement is a commitment with its own
+ * deadline and outlives the note that recorded it. That is the rule
+ * `deleteEntry` already follows for one sentence, applied here to a whole
+ * journal at once.
+ */
+export async function deleteThread(threadId: number): Promise<void> {
+  await tx(async (q) => {
+    // `agreements.thread_id` was added by ALTER TABLE and carries no foreign
+    // key, so nothing clears it on its own — the agreement would survive
+    // pointing at a thread id that no longer exists.
+    await q.run(
+      "UPDATE agreements SET thread_id = NULL WHERE thread_id = ?",
+      threadId,
+    );
+    await q.run("DELETE FROM project_threads WHERE id = ?", threadId);
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Entries                                                             */
 /* ------------------------------------------------------------------ */
