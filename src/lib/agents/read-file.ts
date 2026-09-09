@@ -24,6 +24,32 @@ import { extractSource, UnsupportedSource } from "./extract";
 
 const MODEL = "claude-opus-5";
 
+/**
+ * The types `extract.ts` accepts, keyed by the extension we stored.
+ *
+ * The stored key is the authority, not the display name: a name can be
+ * anything, including something with no extension at all.
+ */
+const MIME: Record<string, string> = {
+  pdf: "application/pdf",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  json: "application/json",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
+export function mimeForKey(key: string): string | null {
+  return MIME[key.split(".").pop()?.toLowerCase() ?? ""] ?? null;
+}
+
 /** Past this, a document is not read: the cost stops being worth the answer. */
 const MAX_BYTES = 12 * 1024 * 1024;
 

@@ -1,6 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { isConfigured } from "./claude";
-import { entryDay, memoryOf, type FoundEntry } from "@/lib/project-threads";
+import {
+  entryDay,
+  memoryOf,
+  storeFileText,
+  unreadAttachments,
+  type FoundEntry,
+} from "@/lib/project-threads";
+import { read } from "@/lib/uploads";
+import { mimeForKey, readAttachment } from "./read-file";
 import type { Locale } from "@/lib/types";
 
 /**
@@ -155,11 +163,51 @@ Rules, in order of importance:
    number. Where a document is marked "not read", say that the file exists but
    has not been read — never that the records contain nothing on the subject.`;
 
+/**
+ * Reads any attachment in scope that nobody has read yet, before answering.
+ *
+ * Files uploaded from now on are read as they land; the ones already in the
+ * archive when that started were not. Left alone they would stay invisible
+ * forever, and the honest answer — "a document is attached but has not been
+ * read" — is a true statement that helps nobody. Somebody who asks a question
+ * has said clearly enough that they want the documents read.
+ *
+ * Bounded to a few files per question so an ask does not become a minute of
+ * silence, and each file is read once and stored, so the backlog clears
+ * itself over the first questions asked and never comes back.
+ *
+ * Every failure is silent by design: an unreadable file simply stays unread,
+ * and the answer says so.
+ */
+async function catchUpReading(scope: {
+  projectId: number;
+  threadId?: number;
+}): Promise<void> {
+  const pending = await unreadAttachments(scope);
+  for (const attachment of pending) {
+    const mime = mimeForKey(attachment.file_key);
+    if (!mime) continue;
+    const bytes = read(attachment.file_key);
+    if (!bytes) continue;
+    const text = await readAttachment(bytes, mime, attachment.file_name);
+    if (text) await storeFileText(attachment.id, text);
+  }
+}
+
 export async function askMemory(
   scope: { projectId: number; threadId?: number },
   question: string,
   locale: Locale,
 ): Promise<MemoryOutcome> {
+  // Before anything else, including the key check. Word, Excel, text and CSV
+  // are read locally and need no model at all, so an organisation without an
+  // API key still gets its documents into the search index — only the answer
+  // is unavailable to it, not the reading.
+  //
+  // Ordering matters twice over: the catch-up writes the text that `memoryOf`
+  // is about to select.
+  await catchUpReading(scope);
+
   if (!isConfigured()) return { ok: false, reason: "NO_KEY" };
 
   const { entries, truncated } = await memoryOf(scope);

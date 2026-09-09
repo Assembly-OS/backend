@@ -903,3 +903,52 @@ export async function memoryOf(
   });
   return { entries: kept, truncated };
 }
+
+/** An attachment nobody has read yet, and where to find its bytes. */
+export interface UnreadAttachment {
+  id: number;
+  file_key: string;
+  file_name: string;
+}
+
+/**
+ * Attachments in scope whose words are not in the memory yet.
+ *
+ * These exist because reading arrived after uploading did: every file added
+ * from then on is read as it lands, and everything already in the archive was
+ * not. Rather than leaving those permanently invisible and asking the reader
+ * to go and press a button on each one, the assistant reads them when it is
+ * first asked something.
+ *
+ * Bounded deliberately. A question should not turn into forty document reads
+ * and a minute of silence; three is enough to clear a thread's backlog over
+ * a couple of questions, and each file is only ever read once.
+ */
+export async function unreadAttachments(
+  scope: { projectId: number; threadId?: number },
+  limit = 3,
+): Promise<UnreadAttachment[]> {
+  const params: (string | number)[] = [scope.projectId];
+  if (scope.threadId) params.push(scope.threadId);
+  params.push(limit);
+
+  return await all<UnreadAttachment>(
+    `SELECT e.id, e.file_key, e.file_name
+       FROM thread_entries e
+       JOIN project_threads t ON t.id = e.thread_id
+      WHERE t.project_id = ?${scope.threadId ? " AND e.thread_id = ?" : ""}
+        AND e.file_key IS NOT NULL
+        AND e.file_text IS NULL
+      ORDER BY e.id DESC
+      LIMIT ?`,
+    ...params,
+  );
+}
+
+/** Stores the words read out of one attachment. */
+export async function storeFileText(
+  entryId: number,
+  text: string,
+): Promise<void> {
+  await run("UPDATE thread_entries SET file_text = ? WHERE id = ?", text, entryId);
+}

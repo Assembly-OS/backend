@@ -4,7 +4,7 @@ import { currentUser } from "@/lib/session";
 import { canWriteEntries } from "@/lib/project-access";
 import { entryById } from "@/lib/project-threads";
 import { read, resolvePath } from "@/lib/uploads";
-import { readAttachment } from "@/lib/agents/read-file";
+import { mimeForKey, readAttachment } from "@/lib/agents/read-file";
 import { id as parseId } from "@/lib/validate";
 
 /**
@@ -20,23 +20,6 @@ import { id as parseId } from "@/lib/validate";
  * the assistant can see.
  */
 
-/** The types `extract.ts` accepts, keyed by the extension we stored. */
-const MIME: Record<string, string> = {
-  pdf: "application/pdf",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  png: "image/png",
-  gif: "image/gif",
-  webp: "image/webp",
-  txt: "text/plain",
-  md: "text/markdown",
-  csv: "text/csv",
-  json: "application/json",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-};
-
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -51,10 +34,7 @@ export async function POST(
   if (!entry?.file_key || !entry.file_name)
     return NextResponse.json({ error: "NO_FILE" }, { status: 404 });
 
-  // The stored key is the authority on the extension: a display name can be
-  // anything, including something with no extension at all.
-  const extension = entry.file_key.split(".").pop()?.toLowerCase() ?? "";
-  const mime = MIME[extension];
+  const mime = mimeForKey(entry.file_key);
   if (!mime) return NextResponse.json({ error: "UNSUPPORTED" }, { status: 415 });
 
   if (!resolvePath(entry.file_key))
