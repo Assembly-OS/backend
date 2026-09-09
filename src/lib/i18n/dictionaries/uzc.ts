@@ -789,6 +789,16 @@ const uzc: Dictionary = {
   "memory.EMPTY": "Бу ерда ҳали ҳеч нарса ёзилмаган.",
   "memory.REFUSED": "Бу саволга жавоб берилмади.",
   "memory.ERROR": "Хатолик юз берди",
+
+  /* --- Ilova qilingan hujjat holati --------------------------------- */
+
+  "thread.fileRead": "ўқилди",
+  "thread.fileUnread": "ўқилмаган",
+
+  /* --- Hujjatni o'qish ---------------------------------------------- */
+
+  "thread.readFile": "Ўқиш",
+  "thread.fileUnreadable": "ўқиб бўлмади",
 };
 
 export default uzc;

@@ -3,6 +3,7 @@ import { currentUser } from "@/lib/session";
 import { canWriteEntries } from "@/lib/project-access";
 import { addEntry, entriesOf, threadById } from "@/lib/project-threads";
 import { MAX_BYTES, resolveKind, safeName, store } from "@/lib/uploads";
+import { readAttachment } from "@/lib/agents/read-file";
 import { id as parseId, str } from "@/lib/validate";
 
 /**
@@ -86,6 +87,15 @@ export async function POST(
     const name = safeName(blob.name ?? "", kind);
     const stored = store(bytes, kind, mime, name);
 
+    // Read now, while the bytes are in hand. A document nobody has read is
+    // not in the project's memory — the journal shows a filename and the
+    // assistant, asked what it said, correctly answers that no such record
+    // exists. Awaited rather than fired and forgotten: the upload is slower
+    // by the length of one read, and in exchange the file is searchable the
+    // moment it appears instead of at some unpredictable later point.
+    // A failure is not fatal — the entry is filed either way.
+    const fileText = await readAttachment(Buffer.from(bytes), mime, name);
+
     const id = await addEntry(thread.id, user.id, {
       kind: "FILE",
       body: str(form.get("body"), 8000) ?? "",
@@ -93,8 +103,9 @@ export async function POST(
       fileKey: stored.key,
       fileName: name,
       fileSize: stored.size,
+      fileText,
     });
-    return NextResponse.json({ ok: true, id });
+    return NextResponse.json({ ok: true, id, read: Boolean(fileText) });
   }
 
   const body = (await request.json()) as Record<string, unknown>;

@@ -787,6 +787,16 @@ const uz = {
   "memory.EMPTY": "Bu yerda hali hech narsa yozilmagan.",
   "memory.REFUSED": "Bu savolga javob berilmadi.",
   "memory.ERROR": "Xatolik yuz berdi",
+
+  /* --- Ilova qilingan hujjat holati --------------------------------- */
+
+  "thread.fileRead": "o'qildi",
+  "thread.fileUnread": "o'qilmagan",
+
+  /* --- Hujjatni o'qish ---------------------------------------------- */
+
+  "thread.readFile": "O'qish",
+  "thread.fileUnreadable": "o'qib bo'lmadi",
 };
 
 export default uz;
