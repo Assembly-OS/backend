@@ -789,3 +789,16 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project    ON tasks(loyiha_id, id DESC);
 -- separates somebody ignoring the work from somebody who never saw it.
 -- NULL on every existing row, and NULL is meaningful: not seen.
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS seen_at TEXT;
+
+-- The words inside an attached document.
+--
+-- Without this a file was a dead end in the memory: the journal showed
+-- "ifc-meeting-transcript.pdf, 74 KB" and the assistant, asked what the
+-- transcript said, correctly answered that the records contained no such
+-- thing. The file was in the archive; its contents were nowhere.
+--
+-- Filled once, when the file is uploaded, and read by both the search and the
+-- assistant from then on. NULL means it has not been read — an old row, an
+-- unreadable format, or an extraction that failed — and the assistant is told
+-- that rather than being left to assume the document was empty.
+ALTER TABLE thread_entries ADD COLUMN IF NOT EXISTS file_text TEXT;

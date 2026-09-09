@@ -112,6 +112,8 @@ export interface EntryRow {
   file_key: string | null;
   file_name: string | null;
   file_size: number | null;
+  /** True when the attached document was read into the project's memory. */
+  file_read: boolean;
   link_url: string | null;
   meeting_id: number | null;
   agreement_id: number | null;
@@ -271,6 +273,34 @@ export async function archiveThread(
   );
 }
 
+/**
+ * Removes a thread outright, with everything written in it.
+ *
+ * This sits beside `archiveThread` and is deliberately the harder of the two
+ * to reach. Archiving is how a finished counterpart leaves the sidebar and it
+ * keeps every word; deleting is for the thread that should never have existed
+ * — a duplicate, a typo, a test — where there is no history to lose and
+ * archiving only makes the archive longer.
+ *
+ * Entries and members carry ON DELETE CASCADE and go with it. What those
+ * entries *produced* does not: an agreement is a commitment with its own
+ * deadline and outlives the note that recorded it. That is the rule
+ * `deleteEntry` already follows for one sentence, applied here to a whole
+ * journal at once.
+ */
+export async function deleteThread(threadId: number): Promise<void> {
+  await tx(async (q) => {
+    // `agreements.thread_id` was added by ALTER TABLE and carries no foreign
+    // key, so nothing clears it on its own — the agreement would survive
+    // pointing at a thread id that no longer exists.
+    await q.run(
+      "UPDATE agreements SET thread_id = NULL WHERE thread_id = ?",
+      threadId,
+    );
+    await q.run("DELETE FROM project_threads WHERE id = ?", threadId);
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Entries                                                             */
 /* ------------------------------------------------------------------ */
@@ -279,6 +309,9 @@ const ENTRY_SELECT = `
   SELECT e.id, e.thread_id, e.author_id, u.full_name AS author_full_name,
          e.kind, e.body, e.occurred_on, e.is_pinned,
          e.file_key, e.file_name, e.file_size, e.link_url,
+         -- Presence, not content: a page showing forty entries has no use for
+         -- forty transcripts, only for whether the assistant can read them.
+         (e.file_text IS NOT NULL) AS file_read,
          e.meeting_id, e.agreement_id, e.task_id,
          tk.title AS task_title, tk.status AS task_status,
          tk.deadline AS task_deadline, tu.full_name AS task_assignee,
@@ -341,6 +374,8 @@ export interface NewEntry {
   fileKey?: string | null;
   fileName?: string | null;
   fileSize?: number | null;
+  /** What the document says, read once at upload. Null when unread. */
+  fileText?: string | null;
   linkUrl?: string | null;
   meetingId?: number | null;
   agreementId?: number | null;
@@ -368,8 +403,9 @@ export async function addEntry(
     const id = await q.insert(
       `INSERT INTO thread_entries (thread_id, author_id, kind, body, occurred_on,
                                    file_key, file_name, file_size, link_url,
-                                   meeting_id, agreement_id, task_id, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                                   meeting_id, agreement_id, task_id, created_at,
+                                   file_text)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       threadId,
       authorId,
       entryKind(fields.kind),
@@ -383,6 +419,7 @@ export async function addEntry(
       fields.agreementId ?? null,
       fields.taskId ?? null,
       stamp,
+      fields.fileText ?? null,
     );
 
     // GREATEST, not a plain assignment: writing up a meeting from three weeks
@@ -735,6 +772,9 @@ export interface FoundEntry {
   thread_title: string;
   kind: EntryKind;
   body: string;
+  file_name: string | null;
+  /** The document's words, when it was readable. Null when it was not. */
+  file_text: string | null;
   occurred_on: string | null;
   created_at: string;
   author_full_name: string;
@@ -766,13 +806,19 @@ export async function searchEntries(
     .slice(0, 6);
   if (terms.length === 0) return [];
 
-  const conditions = terms.map(() => "e.body ILIKE ?").join(" AND ");
+    // A word inside an attached document counts as a match: the whole point of
+  // reading the file was that its contents are part of the record.
+  const conditions = terms
+    .map(() => "(e.body ILIKE ? OR e.file_text ILIKE ?)")
+    .join(" AND ");
   const params: (string | number)[] = [scope.projectId];
   if (scope.threadId) params.push(scope.threadId);
-  params.push(...terms.map((term) => `%${term}%`), limit);
+  for (const term of terms) params.push(`%${term}%`, `%${term}%`);
+  params.push(limit);
 
   return await all<FoundEntry>(
     `SELECT e.id, e.thread_id, t.title AS thread_title, e.kind, e.body,
+            e.file_name, e.file_text,
             e.occurred_on, e.created_at, u.full_name AS author_full_name
        FROM thread_entries e
        JOIN project_threads t ON t.id = e.thread_id
@@ -813,6 +859,7 @@ export async function memoryOf(
 
   const rows = await all<FoundEntry>(
     `SELECT e.id, e.thread_id, t.title AS thread_title, e.kind, e.body,
+            e.file_name, e.file_text,
             e.occurred_on, e.created_at, u.full_name AS author_full_name
        FROM thread_entries e
        JOIN project_threads t ON t.id = e.thread_id

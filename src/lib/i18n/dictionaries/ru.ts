@@ -789,6 +789,16 @@ const ru: Dictionary = {
   "memory.EMPTY": "Здесь ещё ничего не записано.",
   "memory.REFUSED": "На этот вопрос ответа не будет.",
   "memory.ERROR": "Что-то пошло не так",
+
+  /* --- Ilova qilingan hujjat holati --------------------------------- */
+
+  "thread.fileRead": "прочитан",
+  "thread.fileUnread": "не прочитан",
+
+  /* --- Hujjatni o'qish ---------------------------------------------- */
+
+  "thread.readFile": "Прочитать",
+  "thread.fileUnreadable": "не удалось прочитать",
 };
 
 export default ru;

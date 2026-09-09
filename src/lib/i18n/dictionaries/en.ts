@@ -789,6 +789,16 @@ const en: Dictionary = {
   "memory.EMPTY": "Nothing has been recorded here yet.",
   "memory.REFUSED": "That question was declined.",
   "memory.ERROR": "Something went wrong",
+
+  /* --- Ilova qilingan hujjat holati --------------------------------- */
+
+  "thread.fileRead": "read",
+  "thread.fileUnread": "not read",
+
+  /* --- Hujjatni o'qish ---------------------------------------------- */
+
+  "thread.readFile": "Read it",
+  "thread.fileUnreadable": "could not read",
 };
 
 export default en;

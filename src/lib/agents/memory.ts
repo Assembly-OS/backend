@@ -108,7 +108,26 @@ function render(entries: FoundEntry[], withThread: boolean): string {
   return entries
     .map((entry) => {
       const where = withThread ? ` · ${entry.thread_title}` : "";
-      return `[${entry.id}] ${entryDay(entry)}${where} · ${entry.author_full_name}\n${entry.body}`;
+      const head = `[${entry.id}] ${entryDay(entry)}${where} · ${entry.author_full_name}`;
+      const parts = [entry.body.trim()].filter(Boolean);
+
+      if (entry.file_name) {
+        // An attached document belongs to the record that carries it, so its
+        // words go in under the same number — a question about "the
+        // transcript" has to be answerable, and answerable with a citation
+        // pointing at the entry somebody can actually open.
+        parts.push(
+          entry.file_text
+            ? `Attached document "${entry.file_name}":\n${entry.file_text}`
+            : // Said plainly rather than left out. An unread file looks
+              // exactly like an empty one to a reader who is only shown the
+              // text, and "the document does not mention it" would be a lie
+              // about a document nobody has read.
+              `Attached document "${entry.file_name}" — not read, contents unknown.`,
+        );
+      }
+
+      return `${head}\n${parts.join("\n\n") || "(no text)"}`;
     })
     .join("\n\n");
 }
@@ -130,7 +149,11 @@ Rules, in order of importance:
 5. Be concise and concrete. Prefer a short dated list to a paragraph when the
    question is about a sequence of events.
 6. Never invent a name, a date, a figure or a commitment that is not written
-   in a record.`;
+   in a record.
+7. Some records carry an attached document. Where its contents are given, they
+   are part of that record and you may answer from them, citing the record's
+   number. Where a document is marked "not read", say that the file exists but
+   has not been read — never that the records contain nothing on the subject.`;
 
 export async function askMemory(
   scope: { projectId: number; threadId?: number },
