@@ -797,6 +797,10 @@ const uz = {
 
   "thread.readFile": "O'qish",
   "thread.fileUnreadable": "o'qib bo'lmadi",
+
+  /* --- Faylni yozuvdan olib tashlash --------------------------------- */
+
+  "thread.detachFile": "Faylni olib tashlash",
 };
 
 export default uz;

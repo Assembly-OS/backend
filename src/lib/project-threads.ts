@@ -462,6 +462,30 @@ export async function pinEntry(
 }
 
 /**
+ * Detaches the file from an entry, keeping the entry itself.
+ *
+ * `file_text` goes with it, and that is the part that matters. The words were
+ * copied into the record so the assistant could answer from them; leaving
+ * them behind would mean a document somebody deleted still answering
+ * questions, quotable and impossible to find. Removing the file has to remove
+ * what it said.
+ *
+ * The stored blob is not unlinked here. It may be the same key another entry
+ * points at, and a wrong `rm` takes a file back from everyone; the archive
+ * keeps it, and the record stops claiming it.
+ */
+export async function detachFile(entryId: number): Promise<void> {
+  await run(
+    `UPDATE thread_entries
+        SET file_key = NULL, file_name = NULL, file_size = NULL,
+            file_text = NULL, edited_at = ?
+      WHERE id = ?`,
+    now(),
+    entryId,
+  );
+}
+
+/**
  * Removes an entry, leaving whatever it produced alone.
  *
  * Deleting the sentence "they promised the documents by Friday" must not
