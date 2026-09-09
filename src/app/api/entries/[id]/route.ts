@@ -3,6 +3,7 @@ import { currentUser } from "@/lib/session";
 import { canEditEntry, canPinEntry } from "@/lib/project-access";
 import {
   deleteEntry,
+  detachFile,
   editEntry,
   entryById,
   pinEntry,
@@ -40,6 +41,15 @@ export async function PATCH(
 
   if (!canEditEntry(user, entry.author_id))
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+
+  // Taking the file off a record that also has words written on it. The
+  // record survives; only the attachment and what it said are removed.
+  if (body.action === "detach") {
+    if (!entry.file_key)
+      return NextResponse.json({ error: "NO_FILE" }, { status: 404 });
+    await detachFile(entry.id);
+    return NextResponse.json({ ok: true });
+  }
 
   const text = str(body.body, 8000);
   if (!text) return NextResponse.json({ error: "EMPTY" }, { status: 400 });

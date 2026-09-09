@@ -799,6 +799,10 @@ const uzc: Dictionary = {
 
   "thread.readFile": "Ўқиш",
   "thread.fileUnreadable": "ўқиб бўлмади",
+
+  /* --- Faylni yozuvdan olib tashlash --------------------------------- */
+
+  "thread.detachFile": "Файлни олиб ташлаш",
 };
 
 export default uzc;
