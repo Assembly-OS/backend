@@ -168,10 +168,8 @@ export async function weeklyReport(
        -- Approved work is credited to the executor, though the author files
        -- it, and to the executor of the STAGE the event belongs to: once a
        -- chain moves on, t.to_user_id names the next person, and the week
-       -- would hand one persons work to another. COALESCE covers every row
+       -- would hand one person's work to another. COALESCE covers every row
        -- written before stages existed, where stage_position is NULL.
-       -- (No apostrophes in here: toPlaceholders() tracks quotes character by
-       -- character and cannot tell a comment from a string literal.)
        (SELECT COUNT(*) FROM task_events e JOIN tasks t ON t.id = e.task_id
           LEFT JOIN task_stages s ON s.task_id = t.id AND s.position = e.stage_position
           WHERE COALESCE(s.to_user_id, t.to_user_id) = u.id

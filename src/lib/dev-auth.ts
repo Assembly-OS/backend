@@ -1,22 +1,11 @@
 import { cookies } from "next/headers";
-import crypto from "node:crypto";
+import { DEV_COOKIE, keyMatches } from "./dev-key";
 
 /**
- * Hidden dev control panel. Access is a shared secret, not a role — the panel
- * is invisible (a 404) to anyone without it. Set DEV_PANEL_KEY in production;
- * a stable default exists only for local development.
+ * Request-side of the hidden dev control panel. The policy it applies lives in
+ * `dev-key.ts`, which carries no Next import and is therefore testable.
  */
-export const DEV_COOKIE = "assambleya_dev";
-
-const DEV_KEY = process.env.DEV_PANEL_KEY?.trim() || "assambleya-dev-2026";
-
-/** Constant-time compare so the key can't be guessed by timing. */
-export function keyMatches(candidate: string | undefined | null): boolean {
-  if (!candidate) return false;
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(DEV_KEY);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
+export { DEV_COOKIE, keyMatches } from "./dev-key";
 
 /** True when the current request carries a valid dev-panel cookie. */
 export async function hasDevAccess(): Promise<boolean> {
