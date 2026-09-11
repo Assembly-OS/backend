@@ -47,31 +47,74 @@ type Global = typeof globalThis & { __assambleyaPool?: Pool };
 export type Param = string | number | null | undefined;
 
 /**
- * `?` → `$1, $2, …`, leaving anything inside a string literal alone.
+ * `?` → `$1, $2, …`, leaving string literals and comments alone.
  *
  * The scan is character by character rather than a regular expression because
  * a query may legitimately contain a question mark inside quotes — a LIKE
  * pattern, a message body — and a regex replacing every `?` would corrupt it
  * into a parameter that does not exist.
+ *
+ * Comments are tracked for the same reason quotes are, and the reason is an
+ * outage: a `--` line explaining a subquery ended with the word `week's`, the
+ * scanner read that apostrophe as the start of a string literal, and the two
+ * `?` after it were never numbered. The query went to Postgres two parameters
+ * short and the whole page returned a syntax error. Prose is where
+ * apostrophes live, so a scanner that only understands quotes will be broken
+ * by the next person who writes one.
  */
 export function toPlaceholders(sql: string): string {
   let out = "";
   let n = 0;
   let quote: string | null = null;
+  let line = false; // inside a -- comment, until the newline
+  let block = 0; // depth of /* */, which Postgres allows to nest
 
   for (let i = 0; i < sql.length; i++) {
     const ch = sql[i];
+    const next = sql[i + 1];
 
     if (quote) {
       out += ch;
       // '' inside a single-quoted literal is an escaped quote, not the end.
       if (ch === quote) {
-        if (sql[i + 1] === quote) {
+        if (next === quote) {
           out += sql[++i];
         } else {
           quote = null;
         }
       }
+      continue;
+    }
+
+    if (line) {
+      out += ch;
+      if (ch === "\n") line = false;
+      continue;
+    }
+
+    if (block > 0) {
+      if (ch === "/" && next === "*") block++;
+      else if (ch === "*" && next === "/") block--;
+      else {
+        out += ch;
+        continue;
+      }
+      out += ch + next;
+      i++;
+      continue;
+    }
+
+    if (ch === "-" && next === "-") {
+      line = true;
+      out += "--";
+      i++;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      block = 1;
+      out += "/*";
+      i++;
       continue;
     }
 
