@@ -182,6 +182,38 @@ export async function taskById(id: number): Promise<TaskRow | undefined> {
   return await get<TaskRow>(`${TASK_SELECT} WHERE t.id = ?`, id);
 }
 
+/**
+ * The tasks behind one person's "done" figure in the report, for `from`..`to`.
+ *
+ * Same predicate as that count in `weeklyReport`: an approval, credited to the
+ * executor of the stage it closed rather than to whoever holds the task now.
+ * One row per task, dated by its latest approval in the stretch — a task that
+ * was returned and approved again is one piece of work, not two.
+ */
+export async function completedTasks(
+  userId: number,
+  from: string,
+  to: string,
+): Promise<TaskRow[]> {
+  return await all<TaskRow>(
+    `SELECT x.*, d.completed_at
+       FROM (${TASK_SELECT}) x
+       JOIN (SELECT e.task_id, MAX(e.created_at) AS completed_at
+               FROM task_events e
+               JOIN tasks t ON t.id = e.task_id
+               LEFT JOIN task_stages s
+                      ON s.task_id = e.task_id AND s.position = e.stage_position
+              WHERE COALESCE(s.to_user_id, t.to_user_id) = ?
+                AND e.action IN ('TASDIQLANDI','BOSQICH_TASDIQLANDI')
+                AND e.created_at >= ? AND e.created_at < ?
+              GROUP BY e.task_id) d ON d.task_id = x.id
+      ORDER BY d.completed_at DESC, x.id DESC`,
+    userId,
+    from,
+    to,
+  );
+}
+
 export interface TaskEventRow {
   id: number;
   action: string;

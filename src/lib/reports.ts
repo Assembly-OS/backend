@@ -91,6 +91,8 @@ export interface WeeklyRow {
   full_name: string;
   role: Role;
   department: string | null;
+  /** Decides whether the viewer may open this person's task list. */
+  manager_id: number | null;
   /** Assignments this person handed out during the week. */
   given: number;
   /** Assignments landed in their inbox during the week. */
@@ -151,7 +153,7 @@ export async function weeklyReport(
   const today = now().slice(0, 10);
 
   const rows = await all<WeeklyRow>(
-    `SELECT u.id, u.login, u.full_name, u.role, u.department,
+    `SELECT u.id, u.login, u.full_name, u.role, u.department, u.manager_id,
        (SELECT COUNT(*) FROM tasks t
           WHERE t.from_user_id = u.id AND t.created_at >= ? AND t.created_at < ?) AS given,
        (SELECT COUNT(*) FROM tasks t
