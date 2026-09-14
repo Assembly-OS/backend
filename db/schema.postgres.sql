@@ -802,3 +802,53 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS seen_at TEXT;
 -- unreadable format, or an extraction that failed — and the assistant is told
 -- that rather than being left to assume the document was empty.
 ALTER TABLE thread_entries ADD COLUMN IF NOT EXISTS file_text TEXT;
+
+-- The document library: files staff upload so the AI assistant can answer
+-- from them. One shared library for the whole Assembly.
+--
+-- A document is read once, in the background, after it lands. `status` says
+-- where that stands, and it is what the Documents page shows next to every
+-- file: READING while it is being read, READY when all of it is available,
+-- PARTIAL when only the first part fitted, FAILED when nothing could be read.
+-- `reason` carries the why for the last two.
+--
+-- `version` goes up every time the file is replaced. Parts carry the version
+-- they were read from, and only the parts of the current version are ever
+-- searched, so a read that was still running when somebody replaced the file
+-- cannot put the old words back.
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title       TEXT NOT NULL,
+  file_key    TEXT NOT NULL,
+  file_name   TEXT NOT NULL,
+  file_size   INTEGER NOT NULL,
+  file_mime   TEXT NOT NULL,
+  -- What the file was: Word, Excel, PowerPoint, PDF, Rasm, Matn.
+  format      TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'READING',
+  -- NO_KEY, UNSUPPORTED, EMPTY, TOO_LONG, REFUSED, ERROR, INTERRUPTED
+  reason      TEXT,
+  text_chars  INTEGER NOT NULL DEFAULT 0,
+  part_count  INTEGER NOT NULL DEFAULT 0,
+  version     INTEGER NOT NULL DEFAULT 1,
+  uploaded_by INTEGER NOT NULL REFERENCES users(id),
+  read_at     TEXT,
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+-- A document cut into passages of a page or so, in reading order. The search
+-- column is kept by Postgres itself, with the simple configuration because
+-- the library is Uzbek, Russian and English at once and no single language
+-- stemmer is right for all three.
+CREATE TABLE IF NOT EXISTS knowledge_parts (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  document_id INTEGER NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  position    INTEGER NOT NULL,
+  body        TEXT NOT NULL,
+  search      tsvector GENERATED ALWAYS AS (to_tsvector('simple', body)) STORED,
+  UNIQUE (document_id, version, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_parts_search ON knowledge_parts USING GIN (search);

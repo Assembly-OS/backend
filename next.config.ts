@@ -65,6 +65,14 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: "default-src 'none'; sandbox" },
         ],
       },
+      // The original files behind library documents: uploaded bytes, the
+      // same policy.
+      {
+        source: "/api/knowledge/:id/file",
+        headers: [
+          { key: "Content-Security-Policy", value: "default-src 'none'; sandbox" },
+        ],
+      },
     ];
   },
 };
