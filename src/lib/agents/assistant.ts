@@ -3,6 +3,11 @@ import { all, get } from "@/lib/pg";
 import { isConfigured } from "./claude";
 import { today, viewStatus } from "@/lib/crm";
 import { assignableUsers } from "@/lib/queries";
+import {
+  documentText,
+  knowledgeCatalog,
+  searchKnowledge,
+} from "@/lib/knowledge";
 import type { User } from "@/lib/types";
 
 /**
@@ -31,7 +36,7 @@ const MODEL = "claude-opus-5";
 
 /** A record the answer was built from. */
 export interface Ref {
-  kind: "company" | "meeting" | "agreement" | "task" | "person";
+  kind: "company" | "meeting" | "agreement" | "task" | "person" | "document";
   id: number;
   label: string;
   href: string;
@@ -197,6 +202,58 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       type: "object",
       properties: { query: { type: "string" } },
       required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_documents",
+    description:
+      "The document library: files staff uploaded so the assistant can " +
+      "answer from them — regulations, strategies, plans, reports, " +
+      "presentations, reference tables. Lists every document with its status " +
+      "(READY, PARTIAL, READING, FAILED). Use to see what exists, or when a " +
+      "question names a document.",
+    input_schema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "search_documents",
+    description:
+      "Search inside the uploaded documents. Returns the best-matching " +
+      "passages, each with its document and part number. Matching is by " +
+      "words, not meaning: when nothing comes back, search again with other " +
+      "wording, a shorter word, or another language — documents are in " +
+      "Uzbek, Russian or English.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The words to look for.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read_document",
+    description:
+      "Read one document's text in order, from a part number (default 1). " +
+      "Returns as many consecutive parts as fit and `next_part` when there " +
+      "is more — call again with it to continue. Use when a passage needs " +
+      "its surrounding context, or to go through a whole document.",
+    input_schema: {
+      type: "object",
+      properties: {
+        document_id: { type: "integer" },
+        from_part: { type: "integer" },
+      },
+      required: ["document_id"],
       additionalProperties: false,
     },
   },
@@ -454,6 +511,73 @@ async function runTool(
       return { people: rows };
     }
 
+    case "list_documents": {
+      const documents = await knowledgeCatalog();
+      return { count: documents.length, documents };
+    }
+
+    case "search_documents": {
+      const hits = await searchKnowledge(String(input.query ?? ""), 8);
+      for (const hit of hits) {
+        remember(context, {
+          kind: "document",
+          id: hit.document_id,
+          label: hit.title,
+          href: `/knowledge/${hit.document_id}`,
+        });
+      }
+      return {
+        count: hits.length,
+        passages: hits.map((hit) => ({
+          document_id: hit.document_id,
+          document: hit.title,
+          part: hit.position,
+          of_parts: hit.part_count,
+          text: hit.body,
+        })),
+      };
+    }
+
+    case "read_document": {
+      const result = await documentText(Number(input.document_id), {
+        from: Number(input.from_part) || 1,
+      });
+      if (!result) return { error: "not_found" };
+      const { document } = result;
+
+      // Said outright, so the answer can be "that file has not been read"
+      // rather than "the document does not mention it".
+      if (document.status === "READING" || document.status === "FAILED") {
+        return {
+          document: document.title,
+          status: document.status,
+          note: "This document has not been read. Its contents are unknown.",
+        };
+      }
+
+      remember(context, {
+        kind: "document",
+        id: document.id,
+        label: document.title,
+        href: `/knowledge/${document.id}`,
+      });
+      return {
+        document: document.title,
+        status: document.status,
+        of_parts: document.part_count,
+        ...(document.status === "PARTIAL"
+          ? {
+              note: "Only the beginning of this file could be read. The rest is not available.",
+            }
+          : {}),
+        parts: result.parts.map((part) => ({
+          part: part.position,
+          text: part.body,
+        })),
+        next_part: result.nextPart,
+      };
+    }
+
     default:
       return { error: `unknown tool: ${name}` };
   }
@@ -544,9 +668,11 @@ const LANG_NAME: Record<string, string> = {
 
 function systemPrompt(user: User, locale: string): string {
   return (
-    "You answer questions about the internal database of the Uzbekistan " +
-    "Economy Assembly — its partner companies, the meetings held with them, " +
-    "what was agreed, and the assignments given to staff.\n\n" +
+    "You answer questions for staff of the Uzbekistan Economy Assembly from " +
+    "two sources: the document library — files staff uploaded so that you " +
+    "can answer from them — and the internal database: partner companies, " +
+    "the meetings held with them, what was agreed, and the assignments given " +
+    "to staff.\n\n" +
     `You are answering ${user.full_name} (${user.role}). ` +
     `Reply in ${LANG_NAME[locale] ?? "Uzbek (latin script)"}, whatever ` +
     "language the question was asked in.\n\n" +
@@ -555,18 +681,31 @@ function systemPrompt(user: User, locale: string): string {
     "1. Answer from the tools, never from memory. If the tools return " +
     "nothing, say plainly that there is no such record — do not guess, and " +
     "do not offer a plausible answer in place of a missing one.\n" +
-    "2. Chain lookups where a question needs it: find the company, then its " +
+    "2. Search the documents first whenever a document could hold the " +
+    "answer: what a regulation, strategy, plan, report or reference table " +
+    "says; a figure, a definition, a procedure, who is responsible. When a " +
+    "search finds nothing, try other wording or another language before " +
+    "concluding, and read the neighbouring parts when a passage alone is not " +
+    "enough.\n" +
+    "3. Answer from what the passages actually say, never from what documents " +
+    "of that kind usually say. If neither the documents nor the database " +
+    "contain the answer, say plainly that the uploaded documents and records " +
+    "do not cover it, and stop there — no general knowledge in its place. A " +
+    "document that has not been read exists but its contents are unknown; " +
+    "say that, not that it says nothing.\n" +
+    "4. Chain lookups where a question needs it: find the company, then its " +
     "meetings, then that meeting's detail.\n" +
-    "3. Name the records you used — the company, the meeting title, the date. " +
-    "The reader gets links to them, so a name is enough; do not print ids.\n" +
-    "4. An agreement's `view_status` is already worked out, including " +
+    "5. Name the records you used — the document, the company, the meeting " +
+    "title, the date. The reader gets links to them, so a name is enough; do " +
+    "not print ids.\n" +
+    "6. An agreement's `view_status` is already worked out, including " +
     "`OVERDUE`. Use it; do not compare dates yourself.\n" +
-    "5. Distinguish an agreement (what was promised to a company) from a task " +
+    "7. Distinguish an agreement (what was promised to a company) from a task " +
     "(work assigned to a colleague). They are different questions.\n" +
-    "6. Be brief. Lead with the answer, then the supporting detail. Use a " +
+    "8. Be brief. Lead with the answer, then the supporting detail. Use a " +
     "short list when there are several items, prose when there is one. Do " +
     "not restate the question.\n" +
-    "7. Task and meeting visibility is already scoped to what this person may " +
+    "9. Task and meeting visibility is already scoped to what this person may " +
     "see. If a question reaches beyond it, say what you can see rather than " +
     "explaining the permission model."
   );
