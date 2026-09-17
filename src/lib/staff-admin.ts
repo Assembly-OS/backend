@@ -30,6 +30,32 @@ function fail(status: number, error: string): StaffWrite {
   return { status, body: { error } };
 }
 
+/**
+ * The department a staff member belongs to — required, and that is new.
+ *
+ * It used to fall back to NULL whenever the field was missing or misspelt,
+ * and the cost of that silence compounds. A task takes its department from
+ * whoever it is assigned to, so a person with no department mints assignments
+ * that belong to no department, and those never reach the chart on the
+ * statistics page: the audit found 26 of 67 assignments (39%) invisible that
+ * way, growing daily. The chairman was reading 61% of the work as if it were
+ * all of it.
+ *
+ * The chairman himself is the one exception. The departments are GR, FR, BR,
+ * PR and AI_LAB — operating arms — and he heads the Assembly rather than one
+ * of them. Forcing a choice there would only teach whoever fills the form that
+ * the field is arbitrary, which is how it ends up wrong everywhere else.
+ */
+function readDepartment(
+  value: unknown,
+  role: Role,
+): { ok: true; department: Department | null } | { ok: false } {
+  if (DEPARTMENTS.includes(value as Department))
+    return { ok: true, department: value as Department };
+  if (role === "RAIS") return { ok: true, department: null };
+  return { ok: false };
+}
+
 /** Creates a staff account and returns its id and login. */
 export async function createStaffAccount(
   body: Record<string, unknown>,
@@ -44,9 +70,9 @@ export async function createStaffAccount(
   if (await loginTaken(login)) return fail(409, "LOGIN_TAKEN");
 
   const role = oneOf(body.role, ROLES, "ISHCHI");
-  const department = DEPARTMENTS.includes(body.department as Department)
-    ? (body.department as Department)
-    : null;
+  const picked = readDepartment(body.department, role);
+  if (!picked.ok) return fail(400, "DEPARTMENT_REQUIRED");
+  const department = picked.department;
   const position = str(body.position, 160);
   const phone = str(body.phone, 40);
   const email = str(body.email, 120);
@@ -158,9 +184,9 @@ export async function updateStaffAccount(
     if (target.role === "RAIS" && role !== "RAIS" && (await activeRaisCount()) <= 1)
       return fail(400, "LAST_RAIS");
 
-    const department = DEPARTMENTS.includes(body.department as Department)
-      ? (body.department as Department)
-      : null;
+    const picked = readDepartment(body.department, role);
+    if (!picked.ok) return fail(400, "DEPARTMENT_REQUIRED");
+    const department = picked.department;
     const managerId = body.managerId == null ? null : parseId(body.managerId);
     // Nobody reports to themselves, and a manager must exist.
     const manager =

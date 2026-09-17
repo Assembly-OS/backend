@@ -1,4 +1,11 @@
 import { all, get, now, run } from "./pg";
+import {
+  doneSql,
+  openSql,
+  overdueSql,
+  statusList,
+  CLOSED_STATUSES,
+} from "./metrics";
 import { seesEverything } from "./oversight";
 import { isManager } from "./types";
 import type {
@@ -340,14 +347,12 @@ export async function counters(userId: number): Promise<Counters> {
        -- Counted over stages, not tasks: the moment a chain moves on, its
        -- first participant stops being \`to_user_id\` and the work they
        -- actually finished would vanish from their own tally.
-       (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = ? AND s.status = 'BAJARILDI') AS completed,
-       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND deadline IS NOT NULL AND deadline < ?
-          AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
+       (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = ? AND ${doneSql('s')}) AS completed,
+       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND ${overdueSql()}) AS overdue,
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ?) AS sent,
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS "sentActive",
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'BAJARILDI') AS "sentDone",
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND deadline IS NOT NULL AND deadline < ?
-          AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS "sentOverdue",
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${openSql()}) AS "sentActive",
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${doneSql()}) AS "sentDone",
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${overdueSql()}) AS "sentOverdue",
        ${UNREAD_TOTAL} AS unread,
        (SELECT COUNT(*) FROM users WHERE manager_id = ? AND is_active = 1) AS team`,
     userId,
@@ -482,9 +487,8 @@ export async function orgTotals(): Promise<OrgTotals> {
        (SELECT COUNT(*) FROM uyushmalar) AS uyushmalar,
        (SELECT COUNT(*) FROM loyihalar) AS loyihalar,
        (SELECT COUNT(*) FROM tasks) AS tasks,
-       (SELECT COUNT(*) FROM tasks WHERE status = 'BAJARILDI') AS done,
-       (SELECT COUNT(*) FROM tasks WHERE deadline IS NOT NULL AND deadline < ?
-          AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
+       (SELECT COUNT(*) FROM tasks WHERE ${doneSql()}) AS done,
+       (SELECT COUNT(*) FROM tasks WHERE ${overdueSql()}) AS overdue,
        (SELECT COALESCE(SUM(members_count),0) FROM uyushmalar) AS members,
        (SELECT COALESCE(SUM(budget),0) FROM loyihalar) AS budget`,
     todayUtc(),
@@ -509,9 +513,9 @@ export async function departmentStats(): Promise<DeptStat[]> {
             h.login AS head_login,
             (SELECT COUNT(*) FROM users s WHERE s.department = d.department AND s.role = 'ISHCHI' AND s.is_active = 1) AS staff,
             (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department) AS total,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND t.status = 'BAJARILDI') AS done,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND t.status IN ('YANGI','QABUL_QILINDI','BAJARILMOQDA','TEKSHIRUVDA')) AS active,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND t.deadline < ? AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue
+            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${doneSql('t')}) AS done,
+            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${openSql('t')}) AS active,
+            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${overdueSql('t')}) AS overdue
      FROM (SELECT 'GR' AS department UNION ALL SELECT 'FR' UNION ALL SELECT 'BR'
            UNION ALL SELECT 'PR' UNION ALL SELECT 'AI_LAB') d
      LEFT JOIN users h ON h.department = d.department AND h.role IN ('BOLIM_RAHBARI','AI_LAB')`,
@@ -543,9 +547,9 @@ export async function uyushmaStats(): Promise<UyushmaStat[]> {
             (SELECT COUNT(*) FROM loyihalar l WHERE l.uyushma_id = u.id) AS projects,
             (SELECT COALESCE(SUM(l.budget),0) FROM loyihalar l WHERE l.uyushma_id = u.id) AS budget,
             (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id) AS tasks_total,
-            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND t.status = 'BAJARILDI') AS tasks_done,
-            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND t.status IN ('YANGI','QABUL_QILINDI','BAJARILMOQDA','TEKSHIRUVDA')) AS tasks_active,
-            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND t.deadline < ? AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS tasks_overdue
+            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND ${doneSql('t')}) AS tasks_done,
+            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND ${openSql('t')}) AS tasks_active,
+            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND ${overdueSql('t')}) AS tasks_overdue
      FROM uyushmalar u
      LEFT JOIN users h ON h.id = u.head_user_id
      ORDER BY u.name`,
@@ -616,12 +620,12 @@ export async function teamStats(managerId: number): Promise<TeamMemberStat[]> {
     // meaning.
     `SELECT u.*,
             (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id) AS total,
-            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id AND s.status = 'BAJARILDI') AS done,
-            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id
-               AND s.status IN ('YANGI','QABUL_QILINDI','BAJARILMOQDA','TEKSHIRUVDA')) AS active,
+            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id AND ${doneSql('s')}) AS done,
+            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id AND ${openSql('s')}) AS active,
             (SELECT COUNT(*) FROM task_stages s JOIN tasks t ON t.id = s.task_id
-              WHERE s.to_user_id = u.id AND t.deadline < ?
-                AND s.status NOT IN ('KUTMOQDA','BAJARILDI','RAD_ETILDI')) AS overdue
+              WHERE s.to_user_id = u.id
+                AND t.deadline IS NOT NULL AND t.deadline < ?
+                AND s.status NOT IN ('KUTMOQDA',${statusList(CLOSED_STATUSES)})) AS overdue
      FROM users u WHERE u.manager_id = ? AND u.is_active = 1
      ORDER BY u.full_name`,
     todayUtc(),
