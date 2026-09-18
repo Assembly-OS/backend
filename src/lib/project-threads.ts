@@ -1,6 +1,7 @@
 import { actingAs } from "./archive";
 import { all, get, insert, now, run, tx } from "./pg";
 import { today } from "./crm";
+import { PHASE_STATUS, type Phase } from "./project-passport";
 import { str } from "./validate";
 import {
   entryDay,
@@ -78,6 +79,32 @@ export interface ProjectSummary {
   started_at: string | null;
   owner_id: number | null;
   owner_full_name: string | null;
+  // The passport, block 1.3 of the rebuild TZ.
+  name_ru: string | null;
+  name_en: string | null;
+  description_ru: string | null;
+  description_en: string | null;
+  budget: number;
+  klaster_id: number | null;
+  klaster_code: string | null;
+  klaster_uz: string | null;
+  klaster_uzc: string | null;
+  klaster_ru: string | null;
+  klaster_en: string | null;
+  tier: string | null;
+  phase: string | null;
+  leader_name: string | null;
+  deputy_id: number | null;
+  deputy_full_name: string | null;
+  deputy_name: string | null;
+  ppp_state: number | null;
+  ppp_public: number | null;
+  ppp_private: number | null;
+  ppp_state_party: string | null;
+  ppp_public_party: string | null;
+  ppp_private_party: string | null;
+  next_decision_on: string | null;
+  first_result: string | null;
   thread_count: number;
   /** Most recent entry across every thread. Null until somebody writes one. */
   last_activity: string | null;
@@ -144,6 +171,14 @@ const PROJECT_SELECT = `
   SELECT l.id, l.code, l.name, l.description, l.status, l.priority, l.stage,
          l.progress, l.deadline, l.started_at, l.owner_id,
          u.full_name AS owner_full_name,
+         l.name_ru, l.name_en, l.description_ru, l.description_en, l.budget,
+         l.klaster_id, k.code AS klaster_code, k.name_uz AS klaster_uz,
+         k.name_uzc AS klaster_uzc, k.name_ru AS klaster_ru, k.name_en AS klaster_en,
+         l.tier, l.phase, l.leader_name, l.deputy_id,
+         dp.full_name AS deputy_full_name, l.deputy_name,
+         l.ppp_state, l.ppp_public, l.ppp_private,
+         l.ppp_state_party, l.ppp_public_party, l.ppp_private_party,
+         l.next_decision_on, l.first_result,
          (SELECT COUNT(*) FROM project_threads pt
            WHERE pt.project_id = l.id AND pt.is_archived = 0) AS thread_count,
          (SELECT MAX(pt.last_entry_at) FROM project_threads pt
@@ -157,7 +192,9 @@ const PROJECT_SELECT = `
              AND tk.deadline < ?
              AND tk.status NOT IN ('BAJARILDI', 'RAD_ETILDI')) AS overdue_tasks
     FROM loyihalar l
-    LEFT JOIN users u ON u.id = l.owner_id`;
+    LEFT JOIN users u ON u.id = l.owner_id
+    LEFT JOIN users dp ON dp.id = l.deputy_id
+    LEFT JOIN klasterlar k ON k.id = l.klaster_id`;
 
 /**
  * Every project, most recently touched first.
@@ -728,24 +765,97 @@ export async function createProject(
   );
 }
 
-export async function updateProject(
+/** The whole passport as the form sends it, already checked. */
+export interface PassportInput {
+  name: string;
+  name_ru: string | null;
+  name_en: string | null;
+  description: string | null;
+  description_ru: string | null;
+  description_en: string | null;
+  klaster_id: number | null;
+  tier: string | null;
+  phase: string | null;
+  stage: string | null;
+  priority: string;
+  owner_id: number | null;
+  leader_name: string | null;
+  deputy_id: number | null;
+  deputy_name: string | null;
+  ppp_state: number | null;
+  ppp_public: number | null;
+  ppp_private: number | null;
+  ppp_state_party: string | null;
+  ppp_public_party: string | null;
+  ppp_private_party: string | null;
+  next_decision_on: string | null;
+  started_at: string | null;
+  deadline: string | null;
+  budget: number;
+  first_result: string | null;
+}
+
+/**
+ * Writes a project's passport.
+ *
+ * `status` is written from the phase, never taken from the form: it is the
+ * older, coarser life cycle that other code still reads, and computing it here
+ * is what keeps the two from ever disagreeing. With no phase chosen yet the
+ * status is left as it was.
+ */
+export async function updatePassport(
   id: number,
-  fields: ProjectFieldsInput,
+  p: PassportInput,
 ): Promise<void> {
   await run(
     `UPDATE loyihalar
-        SET name = ?, description = ?, status = ?, priority = ?, stage = ?,
-            deadline = ?, started_at = ?, owner_id = ?
+        SET name = ?, name_ru = ?, name_en = ?,
+            description = ?, description_ru = ?, description_en = ?,
+            klaster_id = ?, tier = ?, phase = ?, stage = ?, priority = ?,
+            owner_id = ?, leader_name = ?, deputy_id = ?, deputy_name = ?,
+            ppp_state = ?, ppp_public = ?, ppp_private = ?,
+            ppp_state_party = ?, ppp_public_party = ?, ppp_private_party = ?,
+            next_decision_on = ?, started_at = ?, deadline = ?, budget = ?,
+            first_result = ?,
+            status = COALESCE(?, status)
       WHERE id = ?`,
-    fields.name,
-    fields.description,
-    fields.status,
-    fields.priority,
-    fields.stage,
-    fields.deadline,
-    fields.startedAt,
-    fields.ownerId,
+    p.name,
+    p.name_ru,
+    p.name_en,
+    p.description,
+    p.description_ru,
+    p.description_en,
+    p.klaster_id,
+    p.tier,
+    p.phase,
+    p.stage,
+    p.priority,
+    p.owner_id,
+    p.leader_name,
+    p.deputy_id,
+    p.deputy_name,
+    p.ppp_state,
+    p.ppp_public,
+    p.ppp_private,
+    p.ppp_state_party,
+    p.ppp_public_party,
+    p.ppp_private_party,
+    p.next_decision_on,
+    p.started_at,
+    p.deadline,
+    p.budget,
+    p.first_result,
+    p.phase ? PHASE_STATUS[p.phase as Phase] : null,
     id,
+  );
+}
+
+/** The clusters to choose from, in the order the TZ lists them. */
+export async function clusters(): Promise<
+  { id: number; code: string; name_uz: string; name_uzc: string; name_ru: string; name_en: string }[]
+> {
+  return await all(
+    "SELECT id, code, name_uz, name_uzc, name_ru, name_en FROM klasterlar ORDER BY position, id",
   );
 }
 

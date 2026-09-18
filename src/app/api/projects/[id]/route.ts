@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { canManageProjects } from "@/lib/project-access";
-import { projectById, updateProject } from "@/lib/project-threads";
-import { PROJECT_PRIORITIES, PROJECT_STATUSES } from "@/lib/projects";
-import { id as parseId, oneOf, str } from "@/lib/validate";
+import { projectById, updatePassport } from "@/lib/project-threads";
+import { readPassport } from "@/lib/projects";
+import { id as parseId } from "@/lib/validate";
 
-function isoDay(value: unknown): string | null {
-  const day = str(value, 10);
-  return day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
-}
-
+/**
+ * Saves a project's passport, block 1.3 of the rebuild TZ.
+ *
+ * This route existed and nothing called it: the project card had no way to
+ * edit a project at all, which is the TZ's finding — the fields were in the
+ * database and nowhere to fill them. It now takes the whole passport. Who may
+ * save it is unchanged: the managers who may open and restructure projects.
+ */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -24,20 +27,9 @@ export async function PATCH(
   if (!project)
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
-  const body = (await request.json()) as Record<string, unknown>;
-  const name = str(body.name, 120);
-  if (!name) return NextResponse.json({ error: "REQUIRED" }, { status: 400 });
+  const read = await readPassport((await request.json()) as Record<string, unknown>);
+  if (!read.ok) return NextResponse.json({ error: read.error }, { status: 400 });
 
-  await updateProject(project.id, {
-    name,
-    description: str(body.description, 2000),
-    status: oneOf(body.status, PROJECT_STATUSES, "FAOL"),
-    priority: oneOf(body.priority, PROJECT_PRIORITIES, "ORTA"),
-    stage: str(body.stage, 160),
-    deadline: isoDay(body.deadline),
-    startedAt: isoDay(body.startedAt),
-    ownerId: body.ownerId == null ? null : parseId(body.ownerId),
-  });
-
+  await updatePassport(project.id, read.input);
   return NextResponse.json({ ok: true });
 }

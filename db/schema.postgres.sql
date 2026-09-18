@@ -907,6 +907,76 @@ ALTER TABLE agreements ADD COLUMN IF NOT EXISTS kelishuv_id INTEGER
   REFERENCES kelishuvlar(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_agree_kelishuv ON agreements(kelishuv_id);
 
+-- The project passport, block 1.3 of the rebuild TZ.
+--
+-- The TZ's finding: all twenty projects read "Active", none had a leader, a
+-- deputy, a budget or a term filled in, and the card had nowhere to fill them.
+-- A project is the Assembly's largest unit of work and it had the thinnest
+-- record.
+--
+-- Clusters are data, not code: the TZ proposes nine and says in so many words
+-- that the customer approves the final list, so the list has to change without
+-- a release. The nine are seeded once, by code, and left alone afterwards —
+-- ON CONFLICT DO NOTHING, so a renamed cluster is not renamed back on the next
+-- boot. No project is put into one automatically; which project belongs where
+-- is a decision for people, and the passport shows the gap until it is made.
+CREATE TABLE IF NOT EXISTS klasterlar (
+  id       INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  code     TEXT NOT NULL UNIQUE,
+  name_uz  TEXT NOT NULL,
+  name_uzc TEXT NOT NULL,
+  name_ru  TEXT NOT NULL,
+  name_en  TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO klasterlar (code, name_uz, name_uzc, name_ru, name_en, position) VALUES
+  ('INFRA', 'Infratuzilma va shaharsozlik', 'Инфратузилма ва шаҳарсозлик', 'Инфраструктура и градостроительство', 'Infrastructure and urban development', 1),
+  ('LOGISTICS', 'Logistika', 'Логистика', 'Логистика', 'Logistics', 2),
+  ('TRADE', 'Savdo va eksport', 'Савдо ва экспорт', 'Торговля и экспорт', 'Trade and export', 3),
+  ('FINANCE', 'Moliya va investitsiya', 'Молия ва инвестиция', 'Финансы и инвестиции', 'Finance and investment', 4),
+  ('INDUSTRY', 'Sanoat va konglomerat', 'Саноат ва конгломерат', 'Промышленность и конгломераты', 'Industry and conglomerates', 5),
+  ('HUMAN', 'Inson kapitali', 'Инсон капитали', 'Человеческий капитал', 'Human capital', 6),
+  ('SCIENCE', 'Ilm-fan va innovatsiya', 'Илм-фан ва инновация', 'Наука и инновации', 'Science and innovation', 7),
+  ('MEDIA', 'Media va kommunikatsiya', 'Медиа ва коммуникация', 'Медиа и коммуникации', 'Media and communications', 8),
+  ('INSTITUTIONAL', 'Institutsional va diplomatiya', 'Институционал ва дипломатия', 'Институты и дипломатия', 'Institutions and diplomacy', 9)
+ON CONFLICT (code) DO NOTHING;
+
+-- `phase` is the TZ's life cycle — CONCEPT, FEASIBILITY (TIA), PREPARATION,
+-- EXECUTION, MONITORING, CLOSED, FROZEN — and the one source of it. The older
+-- `status` (REJA, FAOL, …) is kept and written from the phase on every save,
+-- so whatever still reads it keeps meaning the same thing; nothing reads it
+-- for the passport. `stage` stays what it was, a free-text line saying where
+-- the project stands right now, which no list of phases can hold.
+--
+-- The leader and the deputy may be outside the Assembly (the TZ says so of the
+-- leader), so each is a staff member or, failing that, a name.
+--
+-- The public-private partnership shares are three whole percentages that must
+-- total a hundred, each with the party answerable for that side.
+--
+-- `first_result` is the TZ's entry condition: a project is admitted with its
+-- first concrete, checkable result named, or it stays a draft.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS klaster_id INTEGER REFERENCES klasterlar(id) ON DELETE SET NULL;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS tier TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS phase TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS leader_name TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS deputy_id INTEGER REFERENCES users(id);
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS deputy_name TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_state INTEGER;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_public INTEGER;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_private INTEGER;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_state_party TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_public_party TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_private_party TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS next_decision_on TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS first_result TEXT;
+-- `name` and `description` are the Uzbek text; the TZ asks for all three.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS name_ru TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS name_en TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS description_ru TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS description_en TEXT;
+CREATE INDEX IF NOT EXISTS idx_loyihalar_klaster ON loyihalar(klaster_id);
+
 -- Nothing in the memory is ever lost to a delete.
 --
 -- The rebuild TZ, section 3: deletion is archival, never physical — "xotira
@@ -965,6 +1035,7 @@ BEGIN
     'loyihalar', 'project_threads', 'thread_entries',
     'meetings', 'meeting_conclusions', 'meeting_memory',
     'meeting_projects', 'meeting_staff', 'kelishuvlar', 'kelishuv_parties',
+    'klasterlar',
     'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
     'tasks', 'task_events', 'task_stages'
   ] LOOP
