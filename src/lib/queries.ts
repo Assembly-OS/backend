@@ -239,9 +239,16 @@ export async function assignableUsers(user: User): Promise<User[]> {
   // the assistant that is the whole point of the post: he is asked to place
   // work across the Assembly, and a list of heads only let him reach five
   // people out of fourteen.
+  // Nobody on any branch below may be handed work they cannot receive. The
+  // chairman only hands work out and accepts results (`receivesTasks`), and
+  // his inbox and execute pages redirect him away — so an assignment addressed
+  // to him was accepted by the API and then seen by no one. It was also how he
+  // came to be offered under "My team" in the audit. The API validates the
+  // assignee against this same list, so excluding him here closes both.
   if (seesEverything(user)) {
     return await all<User>(
-      "SELECT * FROM users WHERE is_active = 1 ORDER BY role, full_name",
+      `SELECT * FROM users WHERE is_active = 1 AND role <> 'RAIS'
+       ORDER BY role, full_name`,
     );
   }
   if (user.role === "ISHCHI") {
@@ -258,7 +265,7 @@ export async function assignableUsers(user: User): Promise<User[]> {
   // page stayed empty and there was never a result to submit.
   return await all<User>(
     `SELECT * FROM users
-     WHERE is_active = 1
+     WHERE is_active = 1 AND role <> 'RAIS'
        AND (id = ?
             OR manager_id = ?
             OR role IN ('BOLIM_RAHBARI','AI_LAB','UYUSHMA_RAISI','LOYIHA_RAHBARI'))
@@ -478,6 +485,13 @@ export interface OrgTotals {
   overdue: number;
   members: number;
   budget: number;
+  /**
+   * Assignments that belong to no department. Shown as their own slice of the
+   * department ring, so the ring adds up to `tasks` whatever the data holds —
+   * the audit found the ring at 41 beside a total of 67, and the 26 missing
+   * were exactly these.
+   */
+  unassigned: number;
 }
 
 export async function orgTotals(): Promise<OrgTotals> {
@@ -490,7 +504,8 @@ export async function orgTotals(): Promise<OrgTotals> {
        (SELECT COUNT(*) FROM tasks WHERE ${doneSql()}) AS done,
        (SELECT COUNT(*) FROM tasks WHERE ${overdueSql()}) AS overdue,
        (SELECT COALESCE(SUM(members_count),0) FROM uyushmalar) AS members,
-       (SELECT COALESCE(SUM(budget),0) FROM loyihalar) AS budget`,
+       (SELECT COALESCE(SUM(budget),0) FROM loyihalar) AS budget,
+       (SELECT COUNT(*) FROM tasks WHERE to_department IS NULL) AS unassigned`,
     todayUtc(),
   ))!;
 }
@@ -516,9 +531,24 @@ export async function departmentStats(): Promise<DeptStat[]> {
             (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${doneSql('t')}) AS done,
             (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${openSql('t')}) AS active,
             (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${overdueSql('t')}) AS overdue
-     FROM (SELECT 'GR' AS department UNION ALL SELECT 'FR' UNION ALL SELECT 'BR'
-           UNION ALL SELECT 'PR' UNION ALL SELECT 'AI_LAB') d
-     LEFT JOIN users h ON h.department = d.department AND h.role IN ('BOLIM_RAHBARI','AI_LAB')`,
+     -- Exactly one row per department, in a fixed order. The head used to be
+     -- a plain join on role, so a second BOLIM_RAHBARI in a department — the
+     -- chairman's assistant carries that role, and now must carry a
+     -- department too — doubled the row and the ring counted that
+     -- department's work twice. The order matters as much: the chart gives
+     -- colours by position, and without ORDER BY a department changed colour
+     -- between page loads. The earliest head wins, which is the department's
+     -- own rather than whoever was attached to it later.
+     FROM (VALUES ('GR', 1), ('FR', 2), ('BR', 3), ('PR', 4), ('AI_LAB', 5))
+          AS d(department, ord)
+     LEFT JOIN LATERAL (
+       SELECT full_name, login FROM users
+        WHERE department = d.department
+          AND role IN ('BOLIM_RAHBARI','AI_LAB') AND is_active = 1
+        ORDER BY id
+        LIMIT 1
+     ) h ON true
+     ORDER BY d.ord`,
     todayUtc(),
   );
 }

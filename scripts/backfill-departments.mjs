@@ -65,6 +65,28 @@ async function main() {
       );
     }
 
+    /* --- 1b. Сотрудники без руководителя — тоже решение человека ------- */
+
+    const { rows: orphanStaff } = await client.query(
+      `SELECT id, login, full_name, role
+         FROM users
+        WHERE manager_id IS NULL AND is_active = 1 AND role <> 'RAIS'
+        ORDER BY role, full_name`,
+    );
+
+    console.log(`\nСотрудники без руководителя: ${orphanStaff.length}`);
+    if (orphanStaff.length) {
+      console.log(
+        "  «Моя команда» строится по этому полю — без него человек\n" +
+          "  не попадает ни в чью команду ни на странице, ни в форме:\n",
+      );
+      for (const u of orphanStaff) {
+        console.log(
+          `    ${pad(u.login, 24)} ${pad(u.role, 16)} ${u.full_name}`,
+        );
+      }
+    }
+
     /* --- 2. Поручения без отдела --------------------------------------- */
 
     const { rows: [counts] } = await client.query(

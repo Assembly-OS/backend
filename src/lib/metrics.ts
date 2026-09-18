@@ -148,11 +148,34 @@ export type MetricScope =
   | "org"
   | "week";
 
+/**
+ * What a figure counts, in a closed set.
+ *
+ * The formula shown to a reader is composed from this plus the scope rather
+ * than written out per figure. Twenty figures in four languages would be
+ * eighty sentences to keep true, and they would drift from the SQL the first
+ * time a bucket changed — which is the failure this whole file exists to stop.
+ * Ten bases and six scopes compose the same twenty explanations and have one
+ * place to correct.
+ */
+export type MetricBasis =
+  | "rows"
+  | "done"
+  | "open"
+  | "overdue"
+  | "incoming"
+  | "inWork"
+  | "onReview"
+  | "sent"
+  | "unread"
+  | "team";
+
 /** One figure the interface shows, and what it is counting over. */
 export interface MetricMeta {
-  /** Dictionary key for the formula shown when the figure is opened. */
+  /** The figure's own name — the field the API already returns it under. */
   readonly key: string;
   readonly scope: MetricScope;
+  readonly basis: MetricBasis;
 }
 
 /**
@@ -160,42 +183,44 @@ export interface MetricMeta {
  *
  * Keyed by the field name the API already returns, so a page renders the chip
  * by looking up the key it is already holding — no call site changes shape.
- * The formula text itself lives in the four dictionaries under
- * `metricFormula.<key>`, because it is read by people in four languages.
+ * The explanation a reader opens is composed from `metric.basis.<basis>` and
+ * `metric.scope.<scope>` in the four dictionaries, never written per figure.
  */
 export const METRICS: Record<string, MetricMeta> = {
   /* Dashboard — counters(), all counted over one person */
-  incoming: { key: "incoming", scope: "personal" },
-  inWork: { key: "inWork", scope: "personal" },
-  onReview: { key: "onReview", scope: "personal" },
-  completed: { key: "completed", scope: "personal" },
-  overdue: { key: "overdue", scope: "personal" },
-  sent: { key: "sent", scope: "personal" },
-  sentActive: { key: "sentActive", scope: "personal" },
-  sentDone: { key: "sentDone", scope: "personal" },
-  sentOverdue: { key: "sentOverdue", scope: "personal" },
-  unread: { key: "unread", scope: "personal" },
-  team: { key: "team", scope: "team" },
+  incoming: { key: "incoming", scope: "personal", basis: "incoming" },
+  inWork: { key: "inWork", scope: "personal", basis: "inWork" },
+  onReview: { key: "onReview", scope: "personal", basis: "onReview" },
+  completed: { key: "completed", scope: "personal", basis: "done" },
+  overdue: { key: "overdue", scope: "personal", basis: "overdue" },
+  sent: { key: "sent", scope: "personal", basis: "sent" },
+  sentActive: { key: "sentActive", scope: "personal", basis: "open" },
+  sentDone: { key: "sentDone", scope: "personal", basis: "done" },
+  sentOverdue: { key: "sentOverdue", scope: "personal", basis: "overdue" },
+  unread: { key: "unread", scope: "personal", basis: "unread" },
+  team: { key: "team", scope: "team", basis: "team" },
 
   /* Statistics — the whole Assembly */
-  orgUsers: { key: "orgUsers", scope: "org" },
-  orgUyushmalar: { key: "orgUyushmalar", scope: "org" },
-  orgLoyihalar: { key: "orgLoyihalar", scope: "org" },
-  orgTasks: { key: "orgTasks", scope: "org" },
-  orgDone: { key: "orgDone", scope: "org" },
-  orgOpen: { key: "orgOpen", scope: "org" },
-  orgOverdue: { key: "orgOverdue", scope: "org" },
-  orgUnassigned: { key: "orgUnassigned", scope: "org" },
+  orgUsers: { key: "orgUsers", scope: "org", basis: "rows" },
+  orgUyushmalar: { key: "orgUyushmalar", scope: "org", basis: "rows" },
+  /** Member companies across all associations, not platform accounts. */
+  orgMembers: { key: "orgMembers", scope: "org", basis: "rows" },
+  orgLoyihalar: { key: "orgLoyihalar", scope: "org", basis: "rows" },
+  orgTasks: { key: "orgTasks", scope: "org", basis: "rows" },
+  orgDone: { key: "orgDone", scope: "org", basis: "done" },
+  orgOpen: { key: "orgOpen", scope: "org", basis: "open" },
+  orgOverdue: { key: "orgOverdue", scope: "org", basis: "overdue" },
+  orgUnassigned: { key: "orgUnassigned", scope: "org", basis: "rows" },
 
   /* Department and association breakdowns */
-  deptTotal: { key: "deptTotal", scope: "department" },
-  deptDone: { key: "deptDone", scope: "department" },
-  deptOpen: { key: "deptOpen", scope: "department" },
-  deptOverdue: { key: "deptOverdue", scope: "department" },
-  uyushmaTotal: { key: "uyushmaTotal", scope: "uyushma" },
-  uyushmaDone: { key: "uyushmaDone", scope: "uyushma" },
-  uyushmaOpen: { key: "uyushmaOpen", scope: "uyushma" },
-  uyushmaOverdue: { key: "uyushmaOverdue", scope: "uyushma" },
+  deptTotal: { key: "deptTotal", scope: "department", basis: "rows" },
+  deptDone: { key: "deptDone", scope: "department", basis: "done" },
+  deptOpen: { key: "deptOpen", scope: "department", basis: "open" },
+  deptOverdue: { key: "deptOverdue", scope: "department", basis: "overdue" },
+  uyushmaTotal: { key: "uyushmaTotal", scope: "uyushma", basis: "rows" },
+  uyushmaDone: { key: "uyushmaDone", scope: "uyushma", basis: "done" },
+  uyushmaOpen: { key: "uyushmaOpen", scope: "uyushma", basis: "open" },
+  uyushmaOverdue: { key: "uyushmaOverdue", scope: "uyushma", basis: "overdue" },
 };
 
 /** The reach of a figure, or `null` when the key is not a registered one. */
