@@ -818,6 +818,10 @@ ALTER TABLE meetings ADD COLUMN IF NOT EXISTS open_issues  TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS legal_status TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS uyushma_id   INTEGER;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS next_task_id INTEGER;
+-- What the AI proposed for the fields left empty, as JSON, until a person
+-- reviews it. Never applied by itself; saving the meeting clears it.
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS ai_fields    TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS ai_fields_at TEXT;
 
 -- A meeting can concern several projects, so the link is a table.
 -- `meetings.loyiha_id` held one project and was never written or read by any

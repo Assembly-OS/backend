@@ -1,7 +1,13 @@
-import { all, get, type Tx } from "./pg";
+import { all, get, now, run, type Tx } from "./pg";
 import { assignableUsers } from "./queries";
 import type { User } from "./types";
-import type { MeetingShape } from "./meeting-fields";
+import {
+  forEmpty,
+  parseSuggestion,
+  suggestedFields,
+  type MeetingShape,
+  type MeetingSuggestion,
+} from "./meeting-fields";
 
 export {
   LEGAL_STATUSES,
@@ -50,6 +56,8 @@ export interface MeetingDetail extends MeetingShape {
   projects: { id: number; code: string; name: string }[];
   staff: { id: number; full_name: string }[];
   summary: string | null;
+  /** What the AI proposed for the empty fields, waiting for a person to review. */
+  suggestion: MeetingSuggestion | null;
 }
 
 /**
@@ -62,11 +70,13 @@ export async function meetingById(
   id: number,
   lang: "uz" | "ru" | "en" = "uz",
 ): Promise<MeetingDetail | undefined> {
-  const row = await get<Omit<MeetingDetail, "projects" | "staff">>(
+  const row = await get<
+    Omit<MeetingDetail, "projects" | "staff" | "suggestion"> & { ai_fields: string | null }
+  >(
     `SELECT m.id, m.title, m.owner_id, m.company_id, m.held_at, m.place,
             m.participants, m.responsible_id, m.description, m.agreed,
             m.open_issues, m.next_steps, m.legal_status, m.uyushma_id,
-            m.next_task_id, m.transcript, m.lang, m.duration,
+            m.next_task_id, m.transcript, m.lang, m.duration, m.ai_fields,
             (m.audio_key IS NOT NULL) AS has_audio, m.created_at, m.updated_at,
             p.name AS company_name, o.full_name AS owner_name,
             r.full_name AS responsible_name, u.name AS uyushma_name,
@@ -104,7 +114,71 @@ export async function meetingById(
     ),
   ]);
 
-  return { ...row, projects, staff };
+  const { ai_fields, ...rest } = row;
+  // Judged against the record as it is now, not as it was when the model
+  // answered: a field filled since then has nothing left to suggest.
+  const stored = parseSuggestion(ai_fields);
+  const open = stored
+    ? forEmpty(stored, {
+        ...rest,
+        project_ids: projects.map((project) => project.id),
+        staff_ids: staff.map((person) => person.id),
+      })
+    : null;
+  return {
+    ...rest,
+    projects,
+    staff,
+    suggestion: open && suggestedFields(open).length ? open : null,
+  };
+}
+
+/**
+ * Keeps what the AI proposed for a meeting, for a person to review.
+ *
+ * Only what the record does not hold is kept — at the moment of writing, and
+ * again whenever it is read — so a suggestion never stands over something a
+ * person typed. Nothing left to propose
+ * clears it. Saving the meeting through the form clears it too: the person
+ * has seen every suggestion by then, and kept or dropped each.
+ */
+export async function storeSuggestion(
+  meetingId: number,
+  suggestion: MeetingSuggestion,
+): Promise<void> {
+  const current = await get<{
+    held_at: string | null;
+    place: string | null;
+    company_id: number | null;
+    participants: string | null;
+    description: string | null;
+    agreed: string | null;
+    open_issues: string | null;
+    next_steps: string | null;
+    responsible_id: number | null;
+    legal_status: string | null;
+  }>(
+    `SELECT held_at, place, company_id, participants, description, agreed,
+            open_issues, next_steps, responsible_id, legal_status
+       FROM meetings WHERE id = ?`,
+    meetingId,
+  );
+  if (!current) return;
+  const [projects, staff] = await Promise.all([
+    all<{ id: number }>("SELECT project_id AS id FROM meeting_projects WHERE meeting_id = ?", meetingId),
+    all<{ id: number }>("SELECT user_id AS id FROM meeting_staff WHERE meeting_id = ?", meetingId),
+  ]);
+  const open = forEmpty(suggestion, {
+    ...current,
+    project_ids: projects.map((row) => row.id),
+    staff_ids: staff.map((row) => row.id),
+  });
+  await run(
+    "UPDATE meetings SET ai_fields = ?, ai_fields_at = ? WHERE id = ?",
+    suggestedFields(open).length ? JSON.stringify(open) : null,
+    now(),
+    meetingId,
+  );
 }
 
 export interface MeetingListRow extends MeetingShape {

@@ -61,7 +61,10 @@ export async function PATCH(
           SET title = ?, company_id = ?, held_at = ?, place = ?, participants = ?,
               responsible_id = ?, description = ?, agreed = ?, open_issues = ?,
               next_steps = ?, legal_status = ?, uyushma_id = ?,
-              transcript = COALESCE(?, transcript), updated_at = ?
+              transcript = COALESCE(?, transcript), updated_at = ?,
+              -- Saved through the form, every suggestion has been seen and
+              -- either kept or dropped.
+              ai_fields = NULL, ai_fields_at = NULL
         WHERE id = ?`,
       input.title,
       input.company_id,

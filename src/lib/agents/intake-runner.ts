@@ -19,7 +19,12 @@ import {
 } from "./intake";
 import { recallMemory, rememberFacts } from "./live";
 import { recordPartners } from "./partners";
+import { isConfigured } from "./claude";
+import { suggestMeetingFields } from "./prefill";
 import type { ExtractedSource } from "./extract";
+import { today } from "@/lib/crm";
+import { storeSuggestion } from "@/lib/meetings";
+import { resolveSuggestion, type MeetingSuggestion } from "@/lib/meeting-fields";
 
 /**
  * Runs the two submission-driven agents and files what they produce.
@@ -91,6 +96,76 @@ async function candidatesFor(user: User): Promise<Candidate[]> {
     department: person.department,
     position: person.position,
   }));
+}
+
+/**
+ * Proposes a meeting's fields from its transcript, checked against the rows
+ * that exist — block 1.1 of the rebuild TZ, "the AI fills the fields, as a
+ * suggestion". Returns the suggestion; writes nothing to the meeting.
+ *
+ * The run is logged like every other agent run, so what the form's button
+ * costs is on the same page as what the analysis costs. Null when no model is
+ * configured (and then nothing is logged: nothing ran) or when it gave nothing
+ * usable.
+ */
+export async function prefillMeeting(
+  owner: User,
+  source: { meetingId: number | null; title: string; transcript: string; lang: string },
+): Promise<MeetingSuggestion | null> {
+  if (!isConfigured() || source.transcript.trim().length < 40) return null;
+  const started = Date.now();
+  const agent = agentById("meeting")!;
+
+  const [staff, assignable, projects, companies] = await Promise.all([
+    all<{ id: number; login: string; full_name: string; position: string | null }>(
+      "SELECT id, login, full_name, position FROM users WHERE is_active = 1 ORDER BY full_name",
+    ),
+    assignableUsers(owner),
+    all<{ id: number; code: string; name: string }>(
+      "SELECT id, code, name FROM loyihalar ORDER BY code LIMIT 300",
+    ),
+    // Most recently in contact first. The model is shown the first few
+    // hundred, to spell a name the way it was filed; every company is still
+    // matched by name afterwards.
+    all<{ id: number; name: string }>(
+      "SELECT id, name FROM partners ORDER BY last_contact_at DESC NULLS LAST, name",
+    ),
+  ]);
+
+  const day = today();
+  const prefill = await suggestMeetingFields({
+    title: source.title,
+    transcript: source.transcript,
+    lang: source.lang,
+    writeIn: owner.lang ?? "uz",
+    today: day,
+    staff,
+    projects,
+    companies: companies.slice(0, 400).map((company) => company.name),
+  });
+
+  await writeRun({
+    agent: agent.id,
+    owner,
+    sourceKind: "prefill",
+    sourceRef: source.meetingId ? String(source.meetingId) : "form",
+    status: prefill ? "ok" : "blocked",
+    detail: prefill ? undefined : "AI maydonlarni taklif qila olmadi",
+    contextRows: staff.length + projects.length + companies.length,
+    tokensIn: prefill?.tokensIn,
+    tokensOut: prefill?.tokensOut,
+    durationMs: Date.now() - started,
+    usedModel: prefill?.model,
+  });
+  if (!prefill) return null;
+
+  return resolveSuggestion(prefill.answer, {
+    staff,
+    responsibles: assignable.map((person) => person.id),
+    projects,
+    companies,
+    today: day,
+  });
 }
 
 async function writeRun(fields: {
@@ -415,16 +490,25 @@ export async function runMeetingIntake(
   const agent = agentById("meeting")!;
   const candidates = await candidatesFor(owner);
 
-  const analysis = await analyzeMeeting(
-    transcript,
-    title,
-    candidates,
-    agent.tokenBudget,
-    lang,
-    // What earlier meetings left behind, so this one does not re-derive the
-    // decisions they already reached.
-    await recallMemory(),
-  );
+  // The record's fields are proposed alongside the analysis, not after it:
+  // the two read the same transcript and neither waits for the other.
+  const [analysis, suggestion] = await Promise.all([
+    analyzeMeeting(
+      transcript,
+      title,
+      candidates,
+      agent.tokenBudget,
+      lang,
+      // What earlier meetings left behind, so this one does not re-derive the
+      // decisions they already reached.
+      await recallMemory(),
+    ),
+    prefillMeeting(owner, { meetingId, title, transcript, lang }),
+  ]);
+  // Kept for review, never applied: the meeting page offers them to whoever
+  // may edit it, and they become the record only when that person saves.
+  if (suggestion) await storeSuggestion(meetingId, suggestion);
+
   if (!analysis) {
     const runId = await writeRun({
       agent: agent.id,
