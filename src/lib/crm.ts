@@ -1,4 +1,5 @@
-import { all, get, insert, now, run } from "./pg";
+import { actingAs } from "./archive";
+import { all, get, insert, now, run, tx } from "./pg";
 import { notify } from "./notifications";
 
 /**
@@ -311,8 +312,14 @@ export async function createContact(input: ContactInput): Promise<number> {
   return id;
 }
 
-export async function deleteContact(id: number): Promise<void> {
-  await run("DELETE FROM contacts WHERE id = ?", id);
+export async function deleteContact(
+  id: number,
+  byUserId: number,
+): Promise<void> {
+  await tx(async (q) => {
+    await actingAs(q, byUserId);
+    await q.run("DELETE FROM contacts WHERE id = ?", id);
+  });
 }
 
 /* ------------------------------------------------------------------ */

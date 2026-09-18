@@ -84,6 +84,6 @@ export async function DELETE(
   if (!canEditEntry(user, entry.author_id))
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
-  await deleteEntry(entry.id);
+  await deleteEntry(entry.id, user.id);
   return NextResponse.json({ ok: true });
 }

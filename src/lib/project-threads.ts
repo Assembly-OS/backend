@@ -1,3 +1,4 @@
+import { actingAs } from "./archive";
 import { all, get, insert, now, run, tx } from "./pg";
 import { today } from "./crm";
 import { str } from "./validate";
@@ -287,9 +288,17 @@ export async function archiveThread(
  * deadline and outlives the note that recorded it. That is the rule
  * `deleteEntry` already follows for one sentence, applied here to a whole
  * journal at once.
+ *
+ * Gone from the project, not from the Assembly: the thread and every entry
+ * the cascade takes are copied into `archive` by the database, under the name
+ * of whoever asked.
  */
-export async function deleteThread(threadId: number): Promise<void> {
+export async function deleteThread(
+  threadId: number,
+  byUserId: number,
+): Promise<void> {
   await tx(async (q) => {
+    await actingAs(q, byUserId);
     // `agreements.thread_id` was added by ALTER TABLE and carries no foreign
     // key, so nothing clears it on its own — the agreement would survive
     // pointing at a thread id that no longer exists.
@@ -492,8 +501,14 @@ export async function detachFile(entryId: number): Promise<void> {
  * delete the agreement that is chasing Friday. The columns are references,
  * not ownership.
  */
-export async function deleteEntry(entryId: number): Promise<void> {
-  await run("DELETE FROM thread_entries WHERE id = ?", entryId);
+export async function deleteEntry(
+  entryId: number,
+  byUserId: number,
+): Promise<void> {
+  await tx(async (q) => {
+    await actingAs(q, byUserId);
+    await q.run("DELETE FROM thread_entries WHERE id = ?", entryId);
+  });
 }
 
 /* ------------------------------------------------------------------ */

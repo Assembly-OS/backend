@@ -802,3 +802,71 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS seen_at TEXT;
 -- unreadable format, or an extraction that failed — and the assistant is told
 -- that rather than being left to assume the document was empty.
 ALTER TABLE thread_entries ADD COLUMN IF NOT EXISTS file_text TEXT;
+
+-- Nothing in the memory is ever lost to a delete.
+--
+-- The rebuild TZ, section 3: deletion is archival, never physical — "xotira
+-- qismida ma'lumot yo'qolmasligi kerak". The schema said otherwise. Deleting a
+-- company cascaded to its contacts and every agreement made with it; deleting
+-- a project thread cascaded to its whole journal; a project, were one ever
+-- deleted, would take every thread with it. The memory the TZ is built around
+-- could be erased by one click on a confirm dialog.
+--
+-- A trigger rather than an `archived_at` column. The column needs a filter in
+-- every read query across two repositories, and the first one missed puts
+-- "deleted" rows back on screen without anybody noticing. The trigger needs
+-- no read query to change: the row leaves the live table exactly as before and
+-- lands here whole. And it cannot be bypassed — it fires for rows removed by a
+-- cascade, by the admin panel, by the dev panel, by psql at 2 a.m. — which a
+-- rule kept in application code cannot promise.
+--
+-- `archived_by` is who asked, when the application said so: a delete that
+-- runs `SELECT set_config('app.user_id', …, true)` in its transaction is
+-- attributed, anything else is recorded with NULL rather than guessed.
+-- Reading this table is for the chairman and the AI Lab head, like the audit
+-- log it will sit beside.
+CREATE TABLE IF NOT EXISTS archive (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  table_name  TEXT NOT NULL,
+  -- NULL for tables keyed by more than one column; the key is in row_data.
+  row_id      BIGINT,
+  row_data    JSONB NOT NULL,
+  archived_by INTEGER,
+  archived_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_archive_row ON archive(table_name, row_id);
+
+CREATE OR REPLACE FUNCTION archive_deleted_row() RETURNS trigger AS $$
+BEGIN
+  INSERT INTO archive (table_name, row_id, row_data, archived_by)
+  VALUES (
+    TG_TABLE_NAME,
+    (to_jsonb(OLD) ->> 'id')::bigint,
+    to_jsonb(OLD),
+    NULLIF(current_setting('app.user_id', true), '')::integer
+  );
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+-- The memory contour, and the history of the work done against it. Chat,
+-- notifications, live-recording scratch rows and personal assistant history
+-- are left out on purpose: they are not the Assembly's record of anything.
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'loyihalar', 'project_threads', 'thread_entries',
+    'meetings', 'meeting_conclusions', 'meeting_memory',
+    'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
+    'tasks', 'task_events', 'task_stages'
+  ] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
+    EXECUTE format(
+      'CREATE TRIGGER archive_on_delete BEFORE DELETE ON %I '
+      'FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()', t);
+  END LOOP;
+END;
+$$;
