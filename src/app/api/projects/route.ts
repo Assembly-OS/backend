@@ -3,6 +3,7 @@ import { currentUser } from "@/lib/session";
 import { canManageProjects } from "@/lib/project-access";
 import { createProject, projectList } from "@/lib/project-threads";
 import { PROJECT_PRIORITIES, PROJECT_STATUSES } from "@/lib/projects";
+import { PHASES, type Phase } from "@/lib/project-passport";
 import { id as parseId, oneOf, str } from "@/lib/validate";
 
 /**
@@ -35,6 +36,9 @@ export async function POST(request: Request) {
     name,
     description: str(body.description, 2000),
     status: oneOf(body.status, PROJECT_STATUSES, "FAOL"),
+    // The form now asks for the phase; an unknown one is simply not set, and
+    // the passport shows the gap.
+    phase: PHASES.includes(body.phase as Phase) ? (body.phase as Phase) : null,
     priority: oneOf(body.priority, PROJECT_PRIORITIES, "ORTA"),
     stage: str(body.stage, 160),
     deadline: isoDay(body.deadline),

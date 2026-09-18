@@ -161,3 +161,37 @@ export function isDraft(p: PassportShape): boolean {
   const missing = missingPassport(p);
   return ENTRY.some((field) => missing.includes(field));
 }
+
+/* ------------------------------------------------------------------ */
+/* Reading in the reader's language                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The Uzbek text, or its Russian or English version for a reader in that
+ * language when one has been written. Cyrillic Uzbek reads the Uzbek — the
+ * same language, and the TZ asks for three, not four.
+ */
+export function inLocale(
+  locale: string,
+  uz: string | null,
+  ru: string | null,
+  en: string | null,
+): string | null {
+  if (locale === "ru" && ru?.trim()) return ru;
+  if (locale === "en" && en?.trim()) return en;
+  return uz;
+}
+
+/** A cluster's name in the reader's language; clusters carry all four. */
+export function clusterName(
+  locale: string,
+  names: { uz: string | null; uzc: string | null; ru: string | null; en: string | null },
+): string | null {
+  const byLocale: Record<string, string | null> = {
+    uz: names.uz,
+    uzc: names.uzc,
+    ru: names.ru,
+    en: names.en,
+  };
+  return byLocale[locale] ?? names.uz;
+}

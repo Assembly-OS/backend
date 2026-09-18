@@ -722,6 +722,8 @@ export interface ProjectFieldsInput {
   deadline: string | null;
   startedAt: string | null;
   ownerId: number | null;
+  /** The TZ's life-cycle phase; `status` is derived from it when given. */
+  phase?: string | null;
 }
 
 /**
@@ -750,18 +752,21 @@ export async function createProject(
 
   return await insert(
     `INSERT INTO loyihalar (code, name, description, status, priority, stage,
-                            deadline, started_at, owner_id, progress, budget, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,0,0,?)`,
+                            deadline, started_at, owner_id, progress, budget, created_at,
+                            phase)
+     VALUES (?,?,?,?,?,?,?,?,?,0,0,?,?)`,
     code,
     fields.name,
     fields.description,
-    fields.status,
+    // One life cycle: with a phase given, the status is what it implies.
+    fields.phase ? PHASE_STATUS[fields.phase as Phase] : fields.status,
     fields.priority,
     fields.stage,
     fields.deadline,
     fields.startedAt,
     fields.ownerId,
     now(),
+    fields.phase ?? null,
   );
 }
 
