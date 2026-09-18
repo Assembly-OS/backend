@@ -803,6 +803,47 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS seen_at TEXT;
 -- that rather than being left to assume the document was empty.
 ALTER TABLE thread_entries ADD COLUMN IF NOT EXISTS file_text TEXT;
 
+-- The meeting record, as block 1.1 of the rebuild TZ defines it.
+--
+-- A meeting used to be a transcript with a company attached, and the question
+-- the TZ is built around — "when did we meet Parsons, and what did we agree"
+-- — had no field to be answered from. `agreed` is that field: the TZ calls it
+-- the most important one, because it is what gets asked years later.
+-- `legal_status` is how far the talks have come — NEGOTIATION, MOU, LOI,
+-- TERM_SHEET, CONTRACT or STOPPED — and it exists so that a memorandum is
+-- never reported as a signed contract. `next_task_id` is the assignment the
+-- meeting's next step became, so an edit does not raise it a second time.
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS agreed       TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS open_issues  TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS legal_status TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS uyushma_id   INTEGER;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS next_task_id INTEGER;
+
+-- A meeting can concern several projects, so the link is a table.
+-- `meetings.loyiha_id` held one project and was never written or read by any
+-- code; its rows, if any, are carried over here and it is left in place only
+-- because dropping a column is not something a startup migration should do.
+CREATE TABLE IF NOT EXISTS meeting_projects (
+  meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  PRIMARY KEY (meeting_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_projects_project
+  ON meeting_projects(project_id, meeting_id);
+INSERT INTO meeting_projects (meeting_id, project_id)
+  SELECT id, loyiha_id FROM meetings WHERE loyiha_id IS NOT NULL
+  ON CONFLICT DO NOTHING;
+
+-- Who from the Assembly was in the room, picked from the staff list rather
+-- than typed: a typed name cannot be searched, counted or notified, and the
+-- people outside the Assembly stay in `meetings.participants` as free text.
+CREATE TABLE IF NOT EXISTS meeting_staff (
+  meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  PRIMARY KEY (meeting_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_staff_user ON meeting_staff(user_id);
+
 -- Nothing in the memory is ever lost to a delete.
 --
 -- The rebuild TZ, section 3: deletion is archival, never physical — "xotira
@@ -860,6 +901,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'loyihalar', 'project_threads', 'thread_entries',
     'meetings', 'meeting_conclusions', 'meeting_memory',
+    'meeting_projects', 'meeting_staff',
     'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
     'tasks', 'task_events', 'task_stages'
   ] LOOP

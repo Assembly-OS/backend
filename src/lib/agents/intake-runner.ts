@@ -1,8 +1,7 @@
-import { all, get, insert, now, run, tx } from "@/lib/pg";
-import { publish } from "@/lib/events";
-import { notify } from "@/lib/notifications";
+import { all, get, insert, now, run } from "@/lib/pg";
 import { notifyBot } from "@/lib/notify-bot";
 import { assignableUsers } from "@/lib/queries";
+import { createAssignment } from "@/lib/assignments";
 import type { User } from "@/lib/types";
 import {
   agentById,
@@ -585,10 +584,9 @@ export async function runMeetingIntake(
 /* ------------------------------------------------------------------ */
 
 /**
- * Creates the real assignment behind an approved `suggest_task`. Deliberately
- * the same shape a person's own form produces — same code sequence, same audit
- * event, same Telegram ping — so nothing downstream can tell an AI-drafted
- * task from a hand-written one except the audit trail that says so.
+ * Creates the real assignment behind an approved `suggest_task`, through the
+ * same path a person's own form and a meeting's next step take. The note on
+ * the creation event is what records that it began as an AI draft.
  */
 export async function createTaskFromProposal(
   ownerId: number,
@@ -600,83 +598,10 @@ export async function createTaskFromProposal(
     deadline?: string | null;
   },
 ): Promise<string> {
-  const author = await get<User>("SELECT * FROM users WHERE id = ?", ownerId);
-  const assignee = await get<User>(
-    "SELECT * FROM users WHERE id = ? AND is_active = 1",
-    payload.toUserId,
+  const { code } = await createAssignment(
+    ownerId,
+    payload,
+    "AI taklifi asosida, tasdiqlangan",
   );
-  if (!author || !assignee) throw new Error("Mas'ul topilmadi");
-
-  // Re-check the assignment graph at execution time: the approver may have
-  // lost the right to assign since the draft was filed.
-  if (
-    !(await assignableUsers(author)).some((person) => person.id === assignee.id)
-  ) {
-    throw new Error("Bu xodimga topshiriq berish huquqi yo'q");
-  }
-
-  const seq =
-    Number(
-      (await get<{ c: number }>("SELECT COUNT(*) AS c FROM tasks"))?.c ?? 0,
-    ) + 1;
-  const code = `T-${String(seq).padStart(4, "0")}`;
-  const stamp = now();
-
-  // One transaction, and a `task_stages` row alongside the task: a plain
-  // assignment is a chain of one, and every count over stages — a person's
-  // completed total, the team table — would silently miss a task that never
-  // got its stage row.
-  const taskId = await tx(async (q) => {
-    // RETURNING, not a lookup by `code` afterwards: code carries no unique
-    // constraint, so that SELECT could hand back another writer's task.
-    const newId = await q.insert(
-      `INSERT INTO tasks (code, title, description, from_user_id, to_user_id,
-                          to_department, priority, status, deadline, uyushma_id, created_at,
-                          current_stage, stage_count, reviewer_user_id)
-       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,1,1,NULL)`,
-      code,
-      payload.title,
-      payload.description ?? null,
-      author.id,
-      assignee.id,
-      assignee.department,
-      payload.priority ?? "ORTA",
-      payload.deadline ?? null,
-      assignee.uyushma_id ?? null,
-      stamp,
-    );
-
-    await q.run(
-      `INSERT INTO task_stages (task_id, position, to_user_id, reviewer_user_id,
-                                instruction, status, created_at)
-       VALUES (?,1,?,NULL,NULL,'YANGI',?)`,
-      newId,
-      assignee.id,
-      stamp,
-    );
-
-    await q.run(
-      "INSERT INTO task_events (task_id, user_id, action, comment, created_at, stage_position) VALUES (?,?,'YARATILDI',?,?,1)",
-      newId,
-      author.id,
-      "AI taklifi asosida, tasdiqlangan",
-      stamp,
-    );
-
-    return newId;
-  });
-
-  publish(author.id, assignee.id);
-  await notify({
-    userId: assignee.id,
-    kind: "task",
-    title: `${code} · ${payload.title}`,
-    body: payload.deadline ? `⏰ ${payload.deadline}` : "",
-    href: "/tasks/inbox",
-    entity: "task",
-    entityId: taskId,
-    push: true,
-  });
-
   return code;
 }

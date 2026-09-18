@@ -267,6 +267,32 @@ export function statusTone(status: TaskStatus): string {
 }
 
 /**
+ * How far talks with a company have come, as a meeting records it.
+ *
+ * Only a signed contract is green: a memorandum or a letter of intent is
+ * information, not a result, and the TZ's rule is that nothing unsigned is
+ * reported as concluded. Stopped talks are the one red. Ongoing negotiation
+ * is the resting state and takes no colour.
+ */
+export function legalTone(status: string | null): string {
+  switch (status) {
+    case "CONTRACT":
+      return `${CHIP} text-emerald-700 dark:text-emerald-300`;
+    case "STOPPED":
+      return `${CHIP} text-rose-700 dark:text-rose-300`;
+    case "MOU":
+    case "LOI":
+    case "TERM_SHEET":
+      return `${CHIP} text-sky-700 dark:text-sky-300`;
+    default:
+      return `${CHIP} muted`;
+  }
+}
+
+/** A record the TZ calls incomplete: waiting on somebody to finish it. */
+export const INCOMPLETE_TONE = `${CHIP} text-amber-700 dark:text-amber-300`;
+
+/**
  * Priority is a modifier, not a state — it stays quiet until it is worth
  * hearing. Normal and low are plain text; only high and critical take colour.
  */

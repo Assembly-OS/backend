@@ -578,6 +578,10 @@ export interface MeetingRow {
   responsible_id: number | null;
   responsible_name: string | null;
   description: string | null;
+  /** What the meeting settled — the field block 1.1 of the TZ is built on. */
+  agreed: string | null;
+  open_issues: string | null;
+  legal_status: string | null;
   next_steps: string | null;
   transcript: string;
   created_at: string;
