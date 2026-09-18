@@ -844,6 +844,69 @@ CREATE TABLE IF NOT EXISTS meeting_staff (
 );
 CREATE INDEX IF NOT EXISTS idx_meeting_staff_user ON meeting_staff(user_id);
 
+-- The agreement as a document, block 1.2 of the rebuild TZ.
+--
+-- `agreements` above is one commitment — somebody owes something by a date,
+-- with a reminder and often a task behind it. The TZ's agreement is the thing
+-- those commitments come from: a memorandum, a letter of intent, a contract,
+-- or a word given across a table, between named parties, with a sum, a
+-- signing date and a term. Nothing in the schema could hold that, so the
+-- question "what have we signed with Parsons, and what does it bind each side
+-- to" had no answer.
+--
+-- The two are linked, not merged. A commitment keeps working exactly as it
+-- did — its deadline board, its reminders, its task — and gains
+-- `kelishuv_id`, the agreement it is an obligation under; the TZ's "each
+-- side's obligations as separate items" are those rows. The table takes an
+-- Uzbek name, like `loyihalar` and `uyushmalar`, because it is one of the
+-- Assembly's own records and because `agreements` was already taken by the
+-- commitments.
+--
+-- `status` is DRAFT, OPEN, DONE or CANCELLED. "Expired" is never stored: it
+-- is an open agreement past `valid_until`, derived at read time the way an
+-- overdue commitment is, so it cannot go stale.
+CREATE TABLE IF NOT EXISTS kelishuvlar (
+  id             INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title          TEXT NOT NULL,
+  -- MOU | LOI | TERM_SHEET | CONTRACT | ORAL
+  kind           TEXT,
+  content        TEXT,
+  loyiha_id      INTEGER REFERENCES loyihalar(id) ON DELETE SET NULL,
+  meeting_id     INTEGER REFERENCES meetings(id) ON DELETE SET NULL,
+  amount         DOUBLE PRECISION,
+  -- UZS | USD | EUR. A sum without its currency is not a sum.
+  currency       TEXT,
+  -- Calendar dates, 'YYYY-MM-DD', never shifted by time zone.
+  signed_on      TEXT,
+  valid_until    TEXT,
+  responsible_id INTEGER REFERENCES users(id),
+  status         TEXT NOT NULL DEFAULT 'DRAFT',
+  -- The signed copy, under the same storage key scheme as any attachment.
+  file_key       TEXT,
+  file_name      TEXT,
+  file_size      INTEGER,
+  created_by     INTEGER REFERENCES users(id),
+  created_at     TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_kelishuv_status  ON kelishuvlar(status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_kelishuv_project ON kelishuvlar(loyiha_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_kelishuv_meeting ON kelishuvlar(meeting_id);
+
+-- The parties, from the company directory: an agreement can bind several.
+CREATE TABLE IF NOT EXISTS kelishuv_parties (
+  kelishuv_id INTEGER NOT NULL REFERENCES kelishuvlar(id) ON DELETE CASCADE,
+  company_id  INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  PRIMARY KEY (kelishuv_id, company_id)
+);
+CREATE INDEX IF NOT EXISTS idx_kelishuv_parties_company ON kelishuv_parties(company_id);
+
+-- The commitment's agreement, when it is an obligation under one.
+ALTER TABLE agreements ADD COLUMN IF NOT EXISTS kelishuv_id INTEGER
+  REFERENCES kelishuvlar(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_agree_kelishuv ON agreements(kelishuv_id);
+
 -- Nothing in the memory is ever lost to a delete.
 --
 -- The rebuild TZ, section 3: deletion is archival, never physical — "xotira
@@ -901,7 +964,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'loyihalar', 'project_threads', 'thread_entries',
     'meetings', 'meeting_conclusions', 'meeting_memory',
-    'meeting_projects', 'meeting_staff',
+    'meeting_projects', 'meeting_staff', 'kelishuvlar', 'kelishuv_parties',
     'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
     'tasks', 'task_events', 'task_stages'
   ] LOOP

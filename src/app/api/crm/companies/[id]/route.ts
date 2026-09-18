@@ -54,7 +54,8 @@ export async function DELETE(
   if (!(await companyById(companyId)))
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
-  // A company with a history is archived, not deleted — the rule staff
+  // A company with a history — meetings, agreements it is a party to,
+  // commitments, threads, notes — is archived, not deleted: the rule staff
   // accounts already follow (HAS_HISTORY). Deleting used to unlink its
   // meetings and erase its agreements, so "when did we meet Parsons and what
   // did we agree" — the question the rebuild TZ is built around — lost its
@@ -65,7 +66,9 @@ export async function DELETE(
     `SELECT (SELECT COUNT(*) FROM meetings WHERE company_id = ?)
           + (SELECT COUNT(*) FROM agreements WHERE company_id = ?)
           + (SELECT COUNT(*) FROM project_threads WHERE company_id = ?)
-          + (SELECT COUNT(*) FROM partner_notes WHERE partner_id = ?) AS n`,
+          + (SELECT COUNT(*) FROM partner_notes WHERE partner_id = ?)
+          + (SELECT COUNT(*) FROM kelishuv_parties WHERE company_id = ?) AS n`,
+    companyId,
     companyId,
     companyId,
     companyId,
