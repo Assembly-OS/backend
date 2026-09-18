@@ -289,6 +289,28 @@ export function legalTone(status: string | null): string {
   }
 }
 
+/**
+ * Where an agreement stands. In force is information, not an alarm; only an
+ * agreement whose term ran out while still open is red, because that one is
+ * waiting on somebody to renew it or close it. A draft and a cancelled one
+ * take no colour.
+ */
+export function kelishuvTone(view: string): string {
+  switch (view) {
+    case "OPEN":
+      return `${CHIP} text-sky-700 dark:text-sky-300`;
+    case "DONE":
+      return `${CHIP} text-emerald-700 dark:text-emerald-300`;
+    case "EXPIRED":
+      return `${CHIP} text-rose-700 dark:text-rose-300`;
+    default:
+      return `${CHIP} muted`;
+  }
+}
+
+/** A plain neutral chip, for labels that are a category rather than a state. */
+export const NEUTRAL_TONE = `${CHIP} muted`;
+
 /** A record the TZ calls incomplete: waiting on somebody to finish it. */
 export const INCOMPLETE_TONE = `${CHIP} text-amber-700 dark:text-amber-300`;
 
