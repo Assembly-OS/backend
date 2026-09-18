@@ -977,6 +977,48 @@ ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS description_ru TEXT;
 ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS description_en TEXT;
 CREATE INDEX IF NOT EXISTS idx_loyihalar_klaster ON loyihalar(klaster_id);
 
+-- A project's work schedule, block 1.4 of the rebuild TZ: "finding the
+-- building, a week; the technical works, twenty days" — each item with its
+-- planned dates, its actual dates beside them, how far along it is, and, when
+-- it has fallen behind, why and what help it needs from the Assembly.
+--
+-- The TZ's reason is succession: when a project's leader changes, the new one
+-- opens this and sees where the work stopped. So the table records the plan
+-- as it was set and the facts as they happened, never one overwritten by the
+-- other.
+--
+-- Not `task_stages`, which is the chain of people one assignment passes
+-- through. Different things; the names are kept apart on purpose.
+--
+-- `help_round` counts the times help has been asked for on one item.
+-- Notifications are unique per person, kind and entity, so each round is its
+-- own entity — otherwise a second request on the same item would never reach
+-- anyone.
+CREATE TABLE IF NOT EXISTS project_stages (
+  id                INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project_id        INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  position          INTEGER NOT NULL,
+  name              TEXT NOT NULL,
+  -- Calendar dates, 'YYYY-MM-DD'.
+  plan_start        TEXT NOT NULL,
+  plan_end          TEXT NOT NULL,
+  fact_start        TEXT,
+  fact_end          TEXT,
+  progress          INTEGER NOT NULL DEFAULT 0,
+  delay_reason      TEXT,
+  help_needed       TEXT,
+  -- REQUESTED | IN_REVIEW | GIVEN | REFUSED
+  help_status       TEXT,
+  help_round        INTEGER NOT NULL DEFAULT 0,
+  help_requested_by INTEGER REFERENCES users(id),
+  help_requested_at TEXT,
+  created_by        INTEGER REFERENCES users(id),
+  created_at        TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_by        INTEGER REFERENCES users(id),
+  updated_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_stages ON project_stages(project_id, position);
+
 -- Nothing in the memory is ever lost to a delete.
 --
 -- The rebuild TZ, section 3: deletion is archival, never physical — "xotira
@@ -1035,7 +1077,7 @@ BEGIN
     'loyihalar', 'project_threads', 'thread_entries',
     'meetings', 'meeting_conclusions', 'meeting_memory',
     'meeting_projects', 'meeting_staff', 'kelishuvlar', 'kelishuv_parties',
-    'klasterlar',
+    'klasterlar', 'project_stages',
     'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
     'tasks', 'task_events', 'task_stages'
   ] LOOP

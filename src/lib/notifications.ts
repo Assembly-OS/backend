@@ -30,7 +30,7 @@ export interface Notification {
 
 export interface NotifyInput {
   userId: number;
-  kind: "task" | "reminder" | "agreement" | "review" | "meeting";
+  kind: "task" | "reminder" | "agreement" | "review" | "meeting" | "project";
   title: string;
   body?: string;
   href?: string;
