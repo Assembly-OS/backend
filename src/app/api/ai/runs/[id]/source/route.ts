@@ -38,8 +38,13 @@ export async function GET(
   if (!runRow || (!canSubmitToAi(user) && runRow.owner_user_id !== user.id))
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
-  // A transcript run's `source_ref` is a meeting id, not a storage key.
-  if (!runRow.source_ref || runRow.source_kind === "transcript")
+  // A transcript or prefill run's `source_ref` is a meeting id, not a
+  // storage key.
+  if (
+    !runRow.source_ref ||
+    runRow.source_kind === "transcript" ||
+    runRow.source_kind === "prefill"
+  )
     return NextResponse.json({ error: "NO_FILE" }, { status: 404 });
 
   const path = resolvePath(runRow.source_ref);

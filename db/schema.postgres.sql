@@ -802,3 +802,293 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS seen_at TEXT;
 -- unreadable format, or an extraction that failed — and the assistant is told
 -- that rather than being left to assume the document was empty.
 ALTER TABLE thread_entries ADD COLUMN IF NOT EXISTS file_text TEXT;
+
+-- The meeting record, as block 1.1 of the rebuild TZ defines it.
+--
+-- A meeting used to be a transcript with a company attached, and the question
+-- the TZ is built around — "when did we meet Parsons, and what did we agree"
+-- — had no field to be answered from. `agreed` is that field: the TZ calls it
+-- the most important one, because it is what gets asked years later.
+-- `legal_status` is how far the talks have come — NEGOTIATION, MOU, LOI,
+-- TERM_SHEET, CONTRACT or STOPPED — and it exists so that a memorandum is
+-- never reported as a signed contract. `next_task_id` is the assignment the
+-- meeting's next step became, so an edit does not raise it a second time.
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS agreed       TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS open_issues  TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS legal_status TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS uyushma_id   INTEGER;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS next_task_id INTEGER;
+-- What the AI proposed for the fields left empty, as JSON, until a person
+-- reviews it. Never applied by itself; saving the meeting clears it.
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS ai_fields    TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS ai_fields_at TEXT;
+
+-- A meeting can concern several projects, so the link is a table.
+-- `meetings.loyiha_id` held one project and was never written or read by any
+-- code; its rows, if any, are carried over here and it is left in place only
+-- because dropping a column is not something a startup migration should do.
+CREATE TABLE IF NOT EXISTS meeting_projects (
+  meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  PRIMARY KEY (meeting_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_projects_project
+  ON meeting_projects(project_id, meeting_id);
+INSERT INTO meeting_projects (meeting_id, project_id)
+  SELECT id, loyiha_id FROM meetings WHERE loyiha_id IS NOT NULL
+  ON CONFLICT DO NOTHING;
+
+-- Who from the Assembly was in the room, picked from the staff list rather
+-- than typed: a typed name cannot be searched, counted or notified, and the
+-- people outside the Assembly stay in `meetings.participants` as free text.
+CREATE TABLE IF NOT EXISTS meeting_staff (
+  meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  PRIMARY KEY (meeting_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_staff_user ON meeting_staff(user_id);
+
+-- The agreement as a document, block 1.2 of the rebuild TZ.
+--
+-- `agreements` above is one commitment — somebody owes something by a date,
+-- with a reminder and often a task behind it. The TZ's agreement is the thing
+-- those commitments come from: a memorandum, a letter of intent, a contract,
+-- or a word given across a table, between named parties, with a sum, a
+-- signing date and a term. Nothing in the schema could hold that, so the
+-- question "what have we signed with Parsons, and what does it bind each side
+-- to" had no answer.
+--
+-- The two are linked, not merged. A commitment keeps working exactly as it
+-- did — its deadline board, its reminders, its task — and gains
+-- `kelishuv_id`, the agreement it is an obligation under; the TZ's "each
+-- side's obligations as separate items" are those rows. The table takes an
+-- Uzbek name, like `loyihalar` and `uyushmalar`, because it is one of the
+-- Assembly's own records and because `agreements` was already taken by the
+-- commitments.
+--
+-- `status` is DRAFT, OPEN, DONE or CANCELLED. "Expired" is never stored: it
+-- is an open agreement past `valid_until`, derived at read time the way an
+-- overdue commitment is, so it cannot go stale.
+CREATE TABLE IF NOT EXISTS kelishuvlar (
+  id             INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title          TEXT NOT NULL,
+  -- MOU | LOI | TERM_SHEET | CONTRACT | ORAL
+  kind           TEXT,
+  content        TEXT,
+  loyiha_id      INTEGER REFERENCES loyihalar(id) ON DELETE SET NULL,
+  meeting_id     INTEGER REFERENCES meetings(id) ON DELETE SET NULL,
+  amount         DOUBLE PRECISION,
+  -- UZS | USD | EUR. A sum without its currency is not a sum.
+  currency       TEXT,
+  -- Calendar dates, 'YYYY-MM-DD', never shifted by time zone.
+  signed_on      TEXT,
+  valid_until    TEXT,
+  responsible_id INTEGER REFERENCES users(id),
+  status         TEXT NOT NULL DEFAULT 'DRAFT',
+  -- The signed copy, under the same storage key scheme as any attachment.
+  file_key       TEXT,
+  file_name      TEXT,
+  file_size      INTEGER,
+  created_by     INTEGER REFERENCES users(id),
+  created_at     TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_kelishuv_status  ON kelishuvlar(status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_kelishuv_project ON kelishuvlar(loyiha_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_kelishuv_meeting ON kelishuvlar(meeting_id);
+
+-- The parties, from the company directory: an agreement can bind several.
+CREATE TABLE IF NOT EXISTS kelishuv_parties (
+  kelishuv_id INTEGER NOT NULL REFERENCES kelishuvlar(id) ON DELETE CASCADE,
+  company_id  INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  PRIMARY KEY (kelishuv_id, company_id)
+);
+CREATE INDEX IF NOT EXISTS idx_kelishuv_parties_company ON kelishuv_parties(company_id);
+
+-- The commitment's agreement, when it is an obligation under one.
+ALTER TABLE agreements ADD COLUMN IF NOT EXISTS kelishuv_id INTEGER
+  REFERENCES kelishuvlar(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_agree_kelishuv ON agreements(kelishuv_id);
+
+-- The project passport, block 1.3 of the rebuild TZ.
+--
+-- The TZ's finding: all twenty projects read "Active", none had a leader, a
+-- deputy, a budget or a term filled in, and the card had nowhere to fill them.
+-- A project is the Assembly's largest unit of work and it had the thinnest
+-- record.
+--
+-- Clusters are data, not code: the TZ proposes nine and says in so many words
+-- that the customer approves the final list, so the list has to change without
+-- a release. The nine are seeded once, by code, and left alone afterwards —
+-- ON CONFLICT DO NOTHING, so a renamed cluster is not renamed back on the next
+-- boot. No project is put into one automatically; which project belongs where
+-- is a decision for people, and the passport shows the gap until it is made.
+CREATE TABLE IF NOT EXISTS klasterlar (
+  id       INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  code     TEXT NOT NULL UNIQUE,
+  name_uz  TEXT NOT NULL,
+  name_uzc TEXT NOT NULL,
+  name_ru  TEXT NOT NULL,
+  name_en  TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO klasterlar (code, name_uz, name_uzc, name_ru, name_en, position) VALUES
+  ('INFRA', 'Infratuzilma va shaharsozlik', 'Инфратузилма ва шаҳарсозлик', 'Инфраструктура и градостроительство', 'Infrastructure and urban development', 1),
+  ('LOGISTICS', 'Logistika', 'Логистика', 'Логистика', 'Logistics', 2),
+  ('TRADE', 'Savdo va eksport', 'Савдо ва экспорт', 'Торговля и экспорт', 'Trade and export', 3),
+  ('FINANCE', 'Moliya va investitsiya', 'Молия ва инвестиция', 'Финансы и инвестиции', 'Finance and investment', 4),
+  ('INDUSTRY', 'Sanoat va konglomerat', 'Саноат ва конгломерат', 'Промышленность и конгломераты', 'Industry and conglomerates', 5),
+  ('HUMAN', 'Inson kapitali', 'Инсон капитали', 'Человеческий капитал', 'Human capital', 6),
+  ('SCIENCE', 'Ilm-fan va innovatsiya', 'Илм-фан ва инновация', 'Наука и инновации', 'Science and innovation', 7),
+  ('MEDIA', 'Media va kommunikatsiya', 'Медиа ва коммуникация', 'Медиа и коммуникации', 'Media and communications', 8),
+  ('INSTITUTIONAL', 'Institutsional va diplomatiya', 'Институционал ва дипломатия', 'Институты и дипломатия', 'Institutions and diplomacy', 9)
+ON CONFLICT (code) DO NOTHING;
+
+-- `phase` is the TZ's life cycle — CONCEPT, FEASIBILITY (TIA), PREPARATION,
+-- EXECUTION, MONITORING, CLOSED, FROZEN — and the one source of it. The older
+-- `status` (REJA, FAOL, …) is kept and written from the phase on every save,
+-- so whatever still reads it keeps meaning the same thing; nothing reads it
+-- for the passport. `stage` stays what it was, a free-text line saying where
+-- the project stands right now, which no list of phases can hold.
+--
+-- The leader and the deputy may be outside the Assembly (the TZ says so of the
+-- leader), so each is a staff member or, failing that, a name.
+--
+-- The public-private partnership shares are three whole percentages that must
+-- total a hundred, each with the party answerable for that side.
+--
+-- `first_result` is the TZ's entry condition: a project is admitted with its
+-- first concrete, checkable result named, or it stays a draft.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS klaster_id INTEGER REFERENCES klasterlar(id) ON DELETE SET NULL;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS tier TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS phase TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS leader_name TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS deputy_id INTEGER REFERENCES users(id);
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS deputy_name TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_state INTEGER;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_public INTEGER;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_private INTEGER;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_state_party TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_public_party TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS ppp_private_party TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS next_decision_on TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS first_result TEXT;
+-- `name` and `description` are the Uzbek text; the TZ asks for all three.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS name_ru TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS name_en TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS description_ru TEXT;
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS description_en TEXT;
+CREATE INDEX IF NOT EXISTS idx_loyihalar_klaster ON loyihalar(klaster_id);
+
+-- A project's work schedule, block 1.4 of the rebuild TZ: "finding the
+-- building, a week; the technical works, twenty days" — each item with its
+-- planned dates, its actual dates beside them, how far along it is, and, when
+-- it has fallen behind, why and what help it needs from the Assembly.
+--
+-- The TZ's reason is succession: when a project's leader changes, the new one
+-- opens this and sees where the work stopped. So the table records the plan
+-- as it was set and the facts as they happened, never one overwritten by the
+-- other.
+--
+-- Not `task_stages`, which is the chain of people one assignment passes
+-- through. Different things; the names are kept apart on purpose.
+--
+-- `help_round` counts the times help has been asked for on one item.
+-- Notifications are unique per person, kind and entity, so each round is its
+-- own entity — otherwise a second request on the same item would never reach
+-- anyone.
+CREATE TABLE IF NOT EXISTS project_stages (
+  id                INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project_id        INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  position          INTEGER NOT NULL,
+  name              TEXT NOT NULL,
+  -- Calendar dates, 'YYYY-MM-DD'.
+  plan_start        TEXT NOT NULL,
+  plan_end          TEXT NOT NULL,
+  fact_start        TEXT,
+  fact_end          TEXT,
+  progress          INTEGER NOT NULL DEFAULT 0,
+  delay_reason      TEXT,
+  help_needed       TEXT,
+  -- REQUESTED | IN_REVIEW | GIVEN | REFUSED
+  help_status       TEXT,
+  help_round        INTEGER NOT NULL DEFAULT 0,
+  help_requested_by INTEGER REFERENCES users(id),
+  help_requested_at TEXT,
+  created_by        INTEGER REFERENCES users(id),
+  created_at        TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_by        INTEGER REFERENCES users(id),
+  updated_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_stages ON project_stages(project_id, position);
+
+-- Nothing in the memory is ever lost to a delete.
+--
+-- The rebuild TZ, section 3: deletion is archival, never physical — "xotira
+-- qismida ma'lumot yo'qolmasligi kerak". The schema said otherwise. Deleting a
+-- company cascaded to its contacts and every agreement made with it; deleting
+-- a project thread cascaded to its whole journal; a project, were one ever
+-- deleted, would take every thread with it. The memory the TZ is built around
+-- could be erased by one click on a confirm dialog.
+--
+-- A trigger rather than an `archived_at` column. The column needs a filter in
+-- every read query across two repositories, and the first one missed puts
+-- "deleted" rows back on screen without anybody noticing. The trigger needs
+-- no read query to change: the row leaves the live table exactly as before and
+-- lands here whole. And it cannot be bypassed — it fires for rows removed by a
+-- cascade, by the admin panel, by the dev panel, by psql at 2 a.m. — which a
+-- rule kept in application code cannot promise.
+--
+-- `archived_by` is who asked, when the application said so: a delete that
+-- runs `SELECT set_config('app.user_id', …, true)` in its transaction is
+-- attributed, anything else is recorded with NULL rather than guessed.
+-- Reading this table is for the chairman and the AI Lab head, like the audit
+-- log it will sit beside.
+CREATE TABLE IF NOT EXISTS archive (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  table_name  TEXT NOT NULL,
+  -- NULL for tables keyed by more than one column; the key is in row_data.
+  row_id      BIGINT,
+  row_data    JSONB NOT NULL,
+  archived_by INTEGER,
+  archived_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_archive_row ON archive(table_name, row_id);
+
+CREATE OR REPLACE FUNCTION archive_deleted_row() RETURNS trigger AS $$
+BEGIN
+  INSERT INTO archive (table_name, row_id, row_data, archived_by)
+  VALUES (
+    TG_TABLE_NAME,
+    (to_jsonb(OLD) ->> 'id')::bigint,
+    to_jsonb(OLD),
+    NULLIF(current_setting('app.user_id', true), '')::integer
+  );
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+-- The memory contour, and the history of the work done against it. Chat,
+-- notifications, live-recording scratch rows and personal assistant history
+-- are left out on purpose: they are not the Assembly's record of anything.
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'loyihalar', 'project_threads', 'thread_entries',
+    'meetings', 'meeting_conclusions', 'meeting_memory',
+    'meeting_projects', 'meeting_staff', 'kelishuvlar', 'kelishuv_parties',
+    'klasterlar', 'project_stages',
+    'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
+    'tasks', 'task_events', 'task_stages'
+  ] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
+    EXECUTE format(
+      'CREATE TRIGGER archive_on_delete BEFORE DELETE ON %I '
+      'FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()', t);
+  END LOOP;
+END;
+$$;

@@ -15,6 +15,6 @@ export async function DELETE(
 
   const contactId = parseId((await params).id);
   if (!contactId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
-  await deleteContact(contactId);
+  await deleteContact(contactId, user.id);
   return NextResponse.json({ ok: true });
 }

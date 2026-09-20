@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { get, insert, now } from "@/lib/pg";
+import { get, now, tx } from "@/lib/pg";
+import { setMeetingLinks } from "@/lib/meetings";
+import { raiseNextStep, readMeetingInput } from "./input";
 import { currentUser } from "@/lib/session";
 import { canWrite } from "@/lib/crm-access";
-import { companyById, createAgreement, touchCompany } from "@/lib/crm";
+import { createAgreement, touchCompany } from "@/lib/crm";
 import { runMeetingIntake } from "@/lib/agents/intake-runner";
 import { assignableUsers } from "@/lib/queries";
 import { id as parseId, oneOf, str } from "@/lib/validate";
@@ -27,40 +29,49 @@ export async function POST(request: Request) {
 
   const body = (await request.json()) as Record<string, unknown>;
 
-  const title = str(body.title, 160);
-  if (!title) return NextResponse.json({ error: "TITLE_REQUIRED" }, { status: 400 });
+  const read = await readMeetingInput(body, user);
+  if (!read.ok) return NextResponse.json({ error: read.error }, { status: 400 });
+  const input = read.input;
+  const companyId = input.company_id;
+  const heldAt = input.held_at;
+  const title = input.title;
 
-  const companyId = parseId(body.company_id);
-  if (companyId && !(await companyById(companyId)))
-    return NextResponse.json({ error: "COMPANY_NOT_FOUND" }, { status: 400 });
-
-  const heldAt = str(body.held_at, 10);
   const lang = oneOf(body.lang, ["auto", "uz-UZ", "ru-RU", "en-US"] as const, "auto");
   const transcript = str(body.transcript, 200_000) ?? "";
-  const responsible = parseId(body.responsible_id) ?? user.id;
 
-  // RETURNING id rather than a following SELECT MAX(id): the maximum is only
-  // this row's id while a single process writes, and the bot writes too.
-  const meetingId = await insert(
-    `INSERT INTO meetings
-       (title, owner_id, company_id, held_at, place, participants, responsible_id,
-        description, next_steps, transcript, lang, duration, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    title,
-    user.id,
-    companyId,
-    heldAt && /^\d{4}-\d{2}-\d{2}$/.test(heldAt) ? heldAt : null,
-    str(body.place, 200),
-    str(body.participants, 1000),
-    responsible,
-    str(body.description, 4000),
-    str(body.next_steps, 4000),
-    transcript,
-    lang,
-    null,
-    now(),
-    now(),
-  );
+  // The meeting and the projects and people it is linked to land together or
+  // not at all: a meeting saved without its links reads as complete nowhere.
+  const meetingId = await tx(async (q) => {
+    // RETURNING id rather than a following SELECT MAX(id): the maximum is only
+    // this row's id while a single process writes, and the bot writes too.
+    const id = await q.insert(
+      `INSERT INTO meetings
+         (title, owner_id, company_id, held_at, place, participants, responsible_id,
+          description, agreed, open_issues, next_steps, legal_status, uyushma_id,
+          transcript, lang, duration, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      title,
+      user.id,
+      companyId,
+      heldAt,
+      input.place,
+      input.participants,
+      input.responsible_id,
+      input.description,
+      input.agreed,
+      input.open_issues,
+      input.next_steps,
+      input.legal_status,
+      input.uyushma_id,
+      transcript,
+      lang,
+      null,
+      now(),
+      now(),
+    );
+    await setMeetingLinks(q, id, input.project_ids, input.staff_ids);
+    return id;
+  });
 
   if (companyId) await touchCompany(companyId, heldAt ?? now().slice(0, 10));
 
@@ -92,9 +103,12 @@ export async function POST(request: Request) {
     agreements += await agreementsFromAnalysis(meetingId, companyId, user.id);
   }
 
+  const task = await raiseNextStep(meetingId, input, user);
+
   return NextResponse.json({
     ok: true,
     id: meetingId,
+    task,
     agreements,
     analysis: analysis
       ? {

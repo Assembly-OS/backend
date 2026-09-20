@@ -80,6 +80,6 @@ export async function DELETE(
   const thread = await threadById(threadId);
   if (!thread) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
-  await deleteThread(thread.id);
+  await deleteThread(thread.id, user.id);
   return NextResponse.json({ ok: true });
 }
