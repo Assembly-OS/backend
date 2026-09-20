@@ -1,4 +1,11 @@
 import { all, get, now, run } from "./pg";
+import {
+  doneSql,
+  openSql,
+  overdueSql,
+  statusList,
+  CLOSED_STATUSES,
+} from "./metrics";
 import { seesEverything } from "./oversight";
 import { isManager } from "./types";
 import type {
@@ -232,9 +239,16 @@ export async function assignableUsers(user: User): Promise<User[]> {
   // the assistant that is the whole point of the post: he is asked to place
   // work across the Assembly, and a list of heads only let him reach five
   // people out of fourteen.
+  // Nobody on any branch below may be handed work they cannot receive. The
+  // chairman only hands work out and accepts results (`receivesTasks`), and
+  // his inbox and execute pages redirect him away — so an assignment addressed
+  // to him was accepted by the API and then seen by no one. It was also how he
+  // came to be offered under "My team" in the audit. The API validates the
+  // assignee against this same list, so excluding him here closes both.
   if (seesEverything(user)) {
     return await all<User>(
-      "SELECT * FROM users WHERE is_active = 1 ORDER BY role, full_name",
+      `SELECT * FROM users WHERE is_active = 1 AND role <> 'RAIS'
+       ORDER BY role, full_name`,
     );
   }
   if (user.role === "ISHCHI") {
@@ -251,7 +265,7 @@ export async function assignableUsers(user: User): Promise<User[]> {
   // page stayed empty and there was never a result to submit.
   return await all<User>(
     `SELECT * FROM users
-     WHERE is_active = 1
+     WHERE is_active = 1 AND role <> 'RAIS'
        AND (id = ?
             OR manager_id = ?
             OR role IN ('BOLIM_RAHBARI','AI_LAB','UYUSHMA_RAISI','LOYIHA_RAHBARI'))
@@ -340,14 +354,12 @@ export async function counters(userId: number): Promise<Counters> {
        -- Counted over stages, not tasks: the moment a chain moves on, its
        -- first participant stops being \`to_user_id\` and the work they
        -- actually finished would vanish from their own tally.
-       (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = ? AND s.status = 'BAJARILDI') AS completed,
-       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND deadline IS NOT NULL AND deadline < ?
-          AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
+       (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = ? AND ${doneSql('s')}) AS completed,
+       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND ${overdueSql()}) AS overdue,
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ?) AS sent,
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS "sentActive",
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND status = 'BAJARILDI') AS "sentDone",
-       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND deadline IS NOT NULL AND deadline < ?
-          AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS "sentOverdue",
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${openSql()}) AS "sentActive",
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${doneSql()}) AS "sentDone",
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${overdueSql()}) AS "sentOverdue",
        ${UNREAD_TOTAL} AS unread,
        (SELECT COUNT(*) FROM users WHERE manager_id = ? AND is_active = 1) AS team`,
     userId,
@@ -473,6 +485,13 @@ export interface OrgTotals {
   overdue: number;
   members: number;
   budget: number;
+  /**
+   * Assignments that belong to no department. Shown as their own slice of the
+   * department ring, so the ring adds up to `tasks` whatever the data holds —
+   * the audit found the ring at 41 beside a total of 67, and the 26 missing
+   * were exactly these.
+   */
+  unassigned: number;
 }
 
 export async function orgTotals(): Promise<OrgTotals> {
@@ -482,11 +501,11 @@ export async function orgTotals(): Promise<OrgTotals> {
        (SELECT COUNT(*) FROM uyushmalar) AS uyushmalar,
        (SELECT COUNT(*) FROM loyihalar) AS loyihalar,
        (SELECT COUNT(*) FROM tasks) AS tasks,
-       (SELECT COUNT(*) FROM tasks WHERE status = 'BAJARILDI') AS done,
-       (SELECT COUNT(*) FROM tasks WHERE deadline IS NOT NULL AND deadline < ?
-          AND status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue,
+       (SELECT COUNT(*) FROM tasks WHERE ${doneSql()}) AS done,
+       (SELECT COUNT(*) FROM tasks WHERE ${overdueSql()}) AS overdue,
        (SELECT COALESCE(SUM(members_count),0) FROM uyushmalar) AS members,
-       (SELECT COALESCE(SUM(budget),0) FROM loyihalar) AS budget`,
+       (SELECT COALESCE(SUM(budget),0) FROM loyihalar) AS budget,
+       (SELECT COUNT(*) FROM tasks WHERE to_department IS NULL) AS unassigned`,
     todayUtc(),
   ))!;
 }
@@ -509,12 +528,27 @@ export async function departmentStats(): Promise<DeptStat[]> {
             h.login AS head_login,
             (SELECT COUNT(*) FROM users s WHERE s.department = d.department AND s.role = 'ISHCHI' AND s.is_active = 1) AS staff,
             (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department) AS total,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND t.status = 'BAJARILDI') AS done,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND t.status IN ('YANGI','QABUL_QILINDI','BAJARILMOQDA','TEKSHIRUVDA')) AS active,
-            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND t.deadline < ? AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS overdue
-     FROM (SELECT 'GR' AS department UNION ALL SELECT 'FR' UNION ALL SELECT 'BR'
-           UNION ALL SELECT 'PR' UNION ALL SELECT 'AI_LAB') d
-     LEFT JOIN users h ON h.department = d.department AND h.role IN ('BOLIM_RAHBARI','AI_LAB')`,
+            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${doneSql('t')}) AS done,
+            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${openSql('t')}) AS active,
+            (SELECT COUNT(*) FROM tasks t WHERE t.to_department = d.department AND ${overdueSql('t')}) AS overdue
+     -- Exactly one row per department, in a fixed order. The head used to be
+     -- a plain join on role, so a second BOLIM_RAHBARI in a department — the
+     -- chairman's assistant carries that role, and now must carry a
+     -- department too — doubled the row and the ring counted that
+     -- department's work twice. The order matters as much: the chart gives
+     -- colours by position, and without ORDER BY a department changed colour
+     -- between page loads. The earliest head wins, which is the department's
+     -- own rather than whoever was attached to it later.
+     FROM (VALUES ('GR', 1), ('FR', 2), ('BR', 3), ('PR', 4), ('AI_LAB', 5))
+          AS d(department, ord)
+     LEFT JOIN LATERAL (
+       SELECT full_name, login FROM users
+        WHERE department = d.department
+          AND role IN ('BOLIM_RAHBARI','AI_LAB') AND is_active = 1
+        ORDER BY id
+        LIMIT 1
+     ) h ON true
+     ORDER BY d.ord`,
     todayUtc(),
   );
 }
@@ -543,9 +577,9 @@ export async function uyushmaStats(): Promise<UyushmaStat[]> {
             (SELECT COUNT(*) FROM loyihalar l WHERE l.uyushma_id = u.id) AS projects,
             (SELECT COALESCE(SUM(l.budget),0) FROM loyihalar l WHERE l.uyushma_id = u.id) AS budget,
             (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id) AS tasks_total,
-            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND t.status = 'BAJARILDI') AS tasks_done,
-            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND t.status IN ('YANGI','QABUL_QILINDI','BAJARILMOQDA','TEKSHIRUVDA')) AS tasks_active,
-            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND t.deadline < ? AND t.status NOT IN ('BAJARILDI','RAD_ETILDI')) AS tasks_overdue
+            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND ${doneSql('t')}) AS tasks_done,
+            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND ${openSql('t')}) AS tasks_active,
+            (SELECT COUNT(*) FROM tasks t WHERE t.uyushma_id = u.id AND ${overdueSql('t')}) AS tasks_overdue
      FROM uyushmalar u
      LEFT JOIN users h ON h.id = u.head_user_id
      ORDER BY u.name`,
@@ -616,12 +650,12 @@ export async function teamStats(managerId: number): Promise<TeamMemberStat[]> {
     // meaning.
     `SELECT u.*,
             (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id) AS total,
-            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id AND s.status = 'BAJARILDI') AS done,
-            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id
-               AND s.status IN ('YANGI','QABUL_QILINDI','BAJARILMOQDA','TEKSHIRUVDA')) AS active,
+            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id AND ${doneSql('s')}) AS done,
+            (SELECT COUNT(*) FROM task_stages s WHERE s.to_user_id = u.id AND ${openSql('s')}) AS active,
             (SELECT COUNT(*) FROM task_stages s JOIN tasks t ON t.id = s.task_id
-              WHERE s.to_user_id = u.id AND t.deadline < ?
-                AND s.status NOT IN ('KUTMOQDA','BAJARILDI','RAD_ETILDI')) AS overdue
+              WHERE s.to_user_id = u.id
+                AND t.deadline IS NOT NULL AND t.deadline < ?
+                AND s.status NOT IN ('KUTMOQDA',${statusList(CLOSED_STATUSES)})) AS overdue
      FROM users u WHERE u.manager_id = ? AND u.is_active = 1
      ORDER BY u.full_name`,
     todayUtc(),
