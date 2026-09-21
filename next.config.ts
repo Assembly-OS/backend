@@ -65,6 +65,13 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: "default-src 'none'; sandbox" },
         ],
       },
+      // The signed copy of an agreement: uploaded bytes, the same policy.
+      {
+        source: "/api/crm/kelishuvlar/:id/file",
+        headers: [
+          { key: "Content-Security-Policy", value: "default-src 'none'; sandbox" },
+        ],
+      },
     ];
   },
 };
