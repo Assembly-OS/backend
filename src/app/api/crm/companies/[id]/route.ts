@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { canDelete, canWrite } from "@/lib/crm-access";
 import { COMPANY_STATUSES, companyById, updateCompany } from "@/lib/crm";
-import { run } from "@/lib/pg";
+import { actingAs } from "@/lib/archive";
+import { get, tx } from "@/lib/pg";
 import { id as parseId, oneOf, str } from "@/lib/validate";
 
 export async function PATCH(
@@ -53,33 +54,51 @@ export async function DELETE(
   if (!(await companyById(companyId)))
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
-  // Meetings outlive the company record — they are the history, and deleting
-  // a directory entry must not erase what was said. They are unlinked instead.
-  await run(
-    "UPDATE meetings SET company_id = NULL WHERE company_id = ?",
+  // A company with a history — meetings, agreements it is a party to,
+  // commitments, threads, notes — is archived, not deleted: the rule staff
+  // accounts already follow (HAS_HISTORY). Deleting used to unlink its
+  // meetings and erase its agreements, so "when did we meet Parsons and what
+  // did we agree" — the question the rebuild TZ is built around — lost its
+  // answer to one confirm dialog. The status list has ARCHIVED for exactly
+  // this. Deleting stays for the record that should never have existed: a
+  // duplicate or a typo, with nothing hanging off it.
+  const history = await get<{ n: number }>(
+    `SELECT (SELECT COUNT(*) FROM meetings WHERE company_id = ?)
+          + (SELECT COUNT(*) FROM agreements WHERE company_id = ?)
+          + (SELECT COUNT(*) FROM project_threads WHERE company_id = ?)
+          + (SELECT COUNT(*) FROM partner_notes WHERE partner_id = ?)
+          + (SELECT COUNT(*) FROM kelishuv_parties WHERE company_id = ?) AS n`,
+    companyId,
+    companyId,
+    companyId,
+    companyId,
     companyId,
   );
+  if (Number(history?.n ?? 0) > 0)
+    return NextResponse.json({ error: "HAS_HISTORY" }, { status: 409 });
 
-  // What the meeting analyses concluded *about this company*, and what it
-  // suggested proposing to them. Unlike a meeting, none of it means anything
-  // once the company is gone. These two carry no ON DELETE rule, so without
-  // this the delete failed on a foreign-key constraint for any company that
-  // had ever been through an analysis — which is most of them.
-  await run("DELETE FROM partner_notes WHERE partner_id = ?", companyId);
-  await run(
-    "DELETE FROM partner_ideas WHERE partner_id = ? OR match_id = ?",
-    companyId,
-    companyId,
-  );
+  // One transaction: this used to be five separate statements, and a failure
+  // part-way left a company that still existed with its links already cut.
+  await tx(async (q) => {
+    await actingAs(q, user.id);
 
-  // A bell that opens a page which no longer exists is worse than no bell.
-  await run(
-    "DELETE FROM notifications WHERE href = ?",
-    `/companies/${companyId}`,
-  );
+    // Ideas that name this company as the other half of a match. With no
+    // meetings behind it there are none of its own, but it may still be
+    // somebody else's suggested partner. No ON DELETE rule on either column.
+    await q.run(
+      "DELETE FROM partner_ideas WHERE partner_id = ? OR match_id = ?",
+      companyId,
+      companyId,
+    );
 
-  // Contacts and agreements cascade; the reminders hanging off those
-  // agreements cascade in turn.
-  await run("DELETE FROM partners WHERE id = ?", companyId);
+    // A bell that opens a page which no longer exists is worse than no bell.
+    await q.run(
+      "DELETE FROM notifications WHERE href = ?",
+      `/companies/${companyId}`,
+    );
+
+    // Contacts cascade, and are archived with it by the database.
+    await q.run("DELETE FROM partners WHERE id = ?", companyId);
+  });
   return NextResponse.json({ ok: true });
 }

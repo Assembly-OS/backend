@@ -34,7 +34,14 @@ COPY . .
 RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 FROM ${NODE_IMAGE} AS runner
+# The base image is pinned by digest, which is what makes a build reproducible
+# and is also why it lags Debian's security updates: the Node image has not been
+# rebuilt since August, and the image scan that gates promotion fails on every
+# distro advisory fixed since. So the packages already in the image are brought
+# up to date here, at build time, before anything else is installed. Pinning
+# still decides *which* Debian; this decides that it is a patched one.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 app \

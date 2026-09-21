@@ -3,7 +3,13 @@ import { hashPassword } from "./auth";
 import { publish } from "./events";
 import { activeRaisCount, loginTaken, LOGIN_PATTERN, MIN_PASSWORD } from "./admin";
 import { id as parseId, oneOf, str } from "./validate";
-import { DEPARTMENTS, ROLES, type Department, type Role } from "./types";
+import {
+  DEPARTMENTS,
+  ROLES,
+  receivesTasks,
+  type Department,
+  type Role,
+} from "./types";
 import { LOCALES } from "./i18n/config";
 
 /**
@@ -30,6 +36,55 @@ function fail(status: number, error: string): StaffWrite {
   return { status, body: { error } };
 }
 
+/**
+ * The department a staff member belongs to — required, and that is new.
+ *
+ * It used to fall back to NULL whenever the field was missing or misspelt,
+ * and the cost of that silence compounds. A task takes its department from
+ * whoever it is assigned to, so a person with no department mints assignments
+ * that belong to no department, and those never reach the chart on the
+ * statistics page: the audit found 26 of 67 assignments (39%) invisible that
+ * way, growing daily. The chairman was reading 61% of the work as if it were
+ * all of it.
+ *
+ * The exception is the chairman, and the test says why rather than naming him:
+ * the department is required of exactly the people who can receive an
+ * assignment, because they are exactly the people who can mint one that
+ * belongs nowhere. The chairman only hands work out and accepts results, so
+ * the field has nothing to do for him — the departments are operating arms and
+ * he heads the Assembly rather than one of them. Forcing a choice there would
+ * teach whoever fills the form that the field is arbitrary, which is how it
+ * ends up wrong everywhere else.
+ *
+ * Association heads and project leads do receive work, so they are not
+ * exceptions however external they feel.
+ */
+/**
+ * Whether this account may be saved without a manager.
+ *
+ * The same shape of rule as the department, and the same reason. The team page
+ * builds "my team" from `manager_id` and the assignment form now groups by it
+ * too, so a person with no manager belongs to nobody's team on either screen —
+ * they are assignable and invisible at once. The audit found the team page
+ * empty for exactly this reason.
+ *
+ * The chairman reports to no one, so he is the exception, as he is for the
+ * department.
+ */
+function managerRequired(role: Role): boolean {
+  return role !== "RAIS";
+}
+
+function readDepartment(
+  value: unknown,
+  role: Role,
+): { ok: true; department: Department | null } | { ok: false } {
+  if (DEPARTMENTS.includes(value as Department))
+    return { ok: true, department: value as Department };
+  if (!receivesTasks(role)) return { ok: true, department: null };
+  return { ok: false };
+}
+
 /** Creates a staff account and returns its id and login. */
 export async function createStaffAccount(
   body: Record<string, unknown>,
@@ -44,9 +99,9 @@ export async function createStaffAccount(
   if (await loginTaken(login)) return fail(409, "LOGIN_TAKEN");
 
   const role = oneOf(body.role, ROLES, "ISHCHI");
-  const department = DEPARTMENTS.includes(body.department as Department)
-    ? (body.department as Department)
-    : null;
+  const picked = readDepartment(body.department, role);
+  if (!picked.ok) return fail(400, "DEPARTMENT_REQUIRED");
+  const department = picked.department;
   const position = str(body.position, 160);
   const phone = str(body.phone, 40);
   const email = str(body.email, 120);
@@ -63,6 +118,9 @@ export async function createStaffAccount(
             managerId,
           )
         )?.id ?? null);
+
+  if (manager === null && managerRequired(role))
+    return fail(400, "MANAGER_REQUIRED");
 
   // RETURNING rather than a follow-up SELECT: the id comes back with the write,
   // and one round trip fewer counts now that the database is over a socket.
@@ -158,9 +216,9 @@ export async function updateStaffAccount(
     if (target.role === "RAIS" && role !== "RAIS" && (await activeRaisCount()) <= 1)
       return fail(400, "LAST_RAIS");
 
-    const department = DEPARTMENTS.includes(body.department as Department)
-      ? (body.department as Department)
-      : null;
+    const picked = readDepartment(body.department, role);
+    if (!picked.ok) return fail(400, "DEPARTMENT_REQUIRED");
+    const department = picked.department;
     const managerId = body.managerId == null ? null : parseId(body.managerId);
     // Nobody reports to themselves, and a manager must exist.
     const manager =
@@ -172,6 +230,9 @@ export async function updateStaffAccount(
               managerId,
             )
           )?.id ?? null);
+
+    if (manager === null && managerRequired(role))
+      return fail(400, "MANAGER_REQUIRED");
 
     await run(
       `UPDATE users SET full_name = ?, role = ?, department = ?, position = ?,

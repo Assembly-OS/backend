@@ -1,4 +1,5 @@
-import { all, get, insert, now, run } from "./pg";
+import { actingAs } from "./archive";
+import { all, get, insert, now, run, tx } from "./pg";
 import { notify } from "./notifications";
 
 /**
@@ -311,8 +312,14 @@ export async function createContact(input: ContactInput): Promise<number> {
   return id;
 }
 
-export async function deleteContact(id: number): Promise<void> {
-  await run("DELETE FROM contacts WHERE id = ?", id);
+export async function deleteContact(
+  id: number,
+  byUserId: number,
+): Promise<void> {
+  await tx(async (q) => {
+    await actingAs(q, byUserId);
+    await q.run("DELETE FROM contacts WHERE id = ?", id);
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -337,6 +344,8 @@ export interface AgreementRow {
   source: string;
   created_at: string;
   done_at: string | null;
+  /** The agreement this commitment is an obligation under, when it is one. */
+  kelishuv_id: number | null;
 }
 
 const AGREEMENT_SELECT = `
@@ -346,6 +355,23 @@ const AGREEMENT_SELECT = `
     LEFT JOIN partners p ON p.id = a.company_id
     LEFT JOIN meetings m ON m.id = a.meeting_id
     LEFT JOIN users u ON u.id = a.owner_user_id`;
+
+/**
+ * The obligations under one agreement: the commitments that carry its id.
+ *
+ * Every one of them, open or closed, oldest first — the order they were
+ * written into the agreement. The TZ's complaint about the old page was that
+ * closed items vanished; under an agreement a fulfilled obligation is part of
+ * the record of what was done.
+ */
+export async function obligationsOf(
+  kelishuvId: number,
+): Promise<AgreementRow[]> {
+  return await all<AgreementRow>(
+    `${AGREEMENT_SELECT} WHERE a.kelishuv_id = ? ORDER BY a.id`,
+    kelishuvId,
+  );
+}
 
 export async function agreementsOf(
   companyId: number,
@@ -412,6 +438,8 @@ export interface AgreementInput {
   /** The project thread it was recorded in, so the journal can be reached
    *  back from the agreement and not only forwards from the entry. */
   thread_id?: number | null;
+  /** The agreement it is an obligation under. */
+  kelishuv_id?: number | null;
 }
 
 export async function createAgreement(input: AgreementInput): Promise<number> {
@@ -420,8 +448,8 @@ export async function createAgreement(input: AgreementInput): Promise<number> {
     `INSERT INTO agreements
        (company_id, meeting_id, description, owner_user_id, owner_name,
         deadline, status, priority, note, source, created_by, created_at,
-        loyiha_id, thread_id)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        loyiha_id, thread_id, kelishuv_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     input.company_id ?? null,
     input.meeting_id ?? null,
     input.description.slice(0, 1000),
@@ -436,6 +464,7 @@ export async function createAgreement(input: AgreementInput): Promise<number> {
     now(),
     input.loyiha_id ?? null,
     input.thread_id ?? null,
+    input.kelishuv_id ?? null,
   );
 
   if (input.owner_user_id) {
@@ -571,6 +600,10 @@ export interface MeetingRow {
   responsible_id: number | null;
   responsible_name: string | null;
   description: string | null;
+  /** What the meeting settled — the field block 1.1 of the TZ is built on. */
+  agreed: string | null;
+  open_issues: string | null;
+  legal_status: string | null;
   next_steps: string | null;
   transcript: string;
   created_at: string;

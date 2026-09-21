@@ -1,6 +1,8 @@
 import { get } from "./pg";
 import { id as parseId, oneOf, str } from "./validate";
-import { PROJECT_STATUSES } from "./project-vocab";
+import { PROJECT_PRIORITIES, PROJECT_STATUSES } from "./project-vocab";
+import { PHASES, TIERS, type Phase, type Tier } from "./project-passport";
+import type { PassportInput } from "./project-threads";
 
 /**
  * Shared shaping for the project admin routes. Both create and edit accept the
@@ -75,4 +77,101 @@ export async function codeTaken(code: string): Promise<boolean> {
       code,
     )) !== undefined
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* The passport                                                        */
+/* ------------------------------------------------------------------ */
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+function day(value: unknown): string | null {
+  const text = str(value, 10);
+  return text && ISO_DAY.test(text) ? text : null;
+}
+
+/** A whole percentage, or null when left blank. */
+function percent(value: unknown): number | null | "BAD" {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 && n <= 100 ? n : "BAD";
+}
+
+/**
+ * Checks a passport the way the TZ asks: only the name is refused when
+ * missing, everything else is judged by `missingPassport` and shown.
+ *
+ * What is refused is what cannot be true — a project that ends before it
+ * starts, partnership shares that are not whole percentages or that are all
+ * given and do not make a hundred, or a person or cluster that does not exist.
+ * Shares left partly blank are not refused: that is an unfinished passport,
+ * not a wrong one.
+ *
+ * A leader or deputy picked from the staff wins over a typed name, so the
+ * record never holds both and disagrees with itself.
+ */
+export async function readPassport(
+  body: Record<string, unknown>,
+): Promise<{ ok: true; input: PassportInput } | { ok: false; error: string }> {
+  const name = str(body.name, 120);
+  if (!name) return { ok: false, error: "REQUIRED" };
+
+  const startedAt = day(body.started_at);
+  const deadline = day(body.deadline);
+  if (startedAt && deadline && deadline < startedAt) return { ok: false, error: "BAD_TERM" };
+
+  const shares = [percent(body.ppp_state), percent(body.ppp_public), percent(body.ppp_private)];
+  if (shares.includes("BAD")) return { ok: false, error: "BAD_PPP" };
+  const [state, pub, priv] = shares as (number | null)[];
+  if (state !== null && pub !== null && priv !== null && state + pub + priv !== 100)
+    return { ok: false, error: "BAD_PPP" };
+
+  const person = async (value: unknown) => {
+    const id = value == null || value === "" ? null : parseId(value);
+    if (id === null) return null;
+    return (await get<{ id: number }>("SELECT id FROM users WHERE id = ? AND is_active = 1", id))
+      ? id
+      : "GONE";
+  };
+  const ownerId = await person(body.owner_id);
+  const deputyId = await person(body.deputy_id);
+  if (ownerId === "GONE" || deputyId === "GONE") return { ok: false, error: "GONE" };
+
+  const klaster = body.klaster_id == null || body.klaster_id === "" ? null : parseId(body.klaster_id);
+  if (klaster && !(await get("SELECT id FROM klasterlar WHERE id = ?", klaster)))
+    return { ok: false, error: "GONE" };
+
+  const budget = Number(body.budget);
+
+  return {
+    ok: true,
+    input: {
+      name,
+      name_ru: str(body.name_ru, 120),
+      name_en: str(body.name_en, 120),
+      description: str(body.description, 2000),
+      description_ru: str(body.description_ru, 2000),
+      description_en: str(body.description_en, 2000),
+      klaster_id: klaster,
+      tier: TIERS.includes(body.tier as Tier) ? (body.tier as Tier) : null,
+      phase: PHASES.includes(body.phase as Phase) ? (body.phase as Phase) : null,
+      stage: str(body.stage, 160),
+      priority: oneOf(body.priority, PROJECT_PRIORITIES, "ORTA"),
+      owner_id: ownerId,
+      leader_name: ownerId ? null : str(body.leader_name, 160),
+      deputy_id: deputyId,
+      deputy_name: deputyId ? null : str(body.deputy_name, 160),
+      ppp_state: state,
+      ppp_public: pub,
+      ppp_private: priv,
+      ppp_state_party: str(body.ppp_state_party, 160),
+      ppp_public_party: str(body.ppp_public_party, 160),
+      ppp_private_party: str(body.ppp_private_party, 160),
+      next_decision_on: day(body.next_decision_on),
+      started_at: startedAt,
+      deadline,
+      // Millions of so'm, as every budget in the platform is stored.
+      budget: Number.isFinite(budget) && budget >= 0 ? budget : 0,
+      first_result: str(body.first_result, 500),
+    },
+  };
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { get, run } from "@/lib/pg";
+import { actingAs } from "@/lib/archive";
+import { get, tx } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { id as parseId } from "@/lib/validate";
@@ -50,13 +51,21 @@ export async function POST(
 
   // The notification goes with it: a bell that opens a task which no longer
   // exists is worse than no bell at all.
-  await run("DELETE FROM notifications WHERE entity = 'task' AND entity_id = ?", taskId);
-  await run("DELETE FROM task_events WHERE task_id = ?", taskId);
-  // The agreement it may have been raised from survives — the commitment was
-  // real even if the assignment carrying it was a misfire.
-  await run("UPDATE agreements SET task_id = NULL WHERE task_id = ?", taskId);
-  // `task_stages` goes with it through ON DELETE CASCADE.
-  await run("DELETE FROM tasks WHERE id = ?", taskId);
+  // One transaction, under the name of whoever withdrew it: the task, its
+  // events and its stages are copied into `archive` by the database as they go.
+  await tx(async (q) => {
+    await actingAs(q, user.id);
+    await q.run(
+      "DELETE FROM notifications WHERE entity = 'task' AND entity_id = ?",
+      taskId,
+    );
+    await q.run("DELETE FROM task_events WHERE task_id = ?", taskId);
+    // The agreement it may have been raised from survives — the commitment was
+    // real even if the assignment carrying it was a misfire.
+    await q.run("UPDATE agreements SET task_id = NULL WHERE task_id = ?", taskId);
+    // `task_stages` goes with it through ON DELETE CASCADE.
+    await q.run("DELETE FROM tasks WHERE id = ?", taskId);
+  });
 
   publish(task.from_user_id, task.to_user_id);
   return NextResponse.json({ ok: true });
