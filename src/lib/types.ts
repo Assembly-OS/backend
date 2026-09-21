@@ -161,6 +161,9 @@ export interface TaskRow extends Task {
   stage_instruction: string | null;
   /** Every participant's name, in order, for the stage strip: "A,B,C". */
   stage_names: string | null;
+  /** When the report credits this person with finishing it. Set only by
+   *  `completedTasks`; absent on every list of the assignment pipeline. */
+  completed_at?: string | null;
 }
 
 /**

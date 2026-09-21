@@ -40,6 +40,26 @@ export function seesEverything(user: User): boolean {
 }
 
 /**
+ * Whose finished work a manager may open from the report, task by task.
+ *
+ * The report's counts reach every manager, and a count gives nothing away. The
+ * titles behind it do: what another department is working on is not every
+ * head's business. So the list opens for the whole Assembly's view, for the
+ * person themselves, and for their direct manager — the same line the team
+ * page draws.
+ */
+export function seesWorkOf(
+  viewer: User,
+  person: Pick<User, "id" | "manager_id">,
+): boolean {
+  return (
+    seesEverything(viewer) ||
+    viewer.id === person.id ||
+    person.manager_id === viewer.id
+  );
+}
+
+/**
  * Staff administration: adding a colleague, issuing a login and a password,
  * correcting a title, switching access off.
  *
