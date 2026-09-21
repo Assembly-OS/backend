@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   approverOf,
   authorizeTransition,
+  missingText,
   type TaskContext,
 } from "../src/lib/task-machine.ts";
 
@@ -185,6 +186,31 @@ test("the mid-chain assignee still accepts and rejects normally", () => {
       authorizeTransition("reject", task("YANGI", middle), ASSIGNEE).to,
     "RAD_ETILDI",
   );
+});
+
+/* ------------------------------------------------------------------ */
+/* Words the TZ requires — block 3.4                                   */
+/* ------------------------------------------------------------------ */
+
+test("handing in work needs a result", () => {
+  assert.equal(missingText("submit", ""), "RESULT_REQUIRED");
+  assert.equal(missingText("submit", "   \n "), "RESULT_REQUIRED");
+  assert.equal(missingText("submit", null), "RESULT_REQUIRED");
+  assert.equal(missingText("submit", "Xat yuborildi, javob kutilmoqda"), null);
+});
+
+test("a refusal and a return need their reason", () => {
+  assert.equal(missingText("reject", undefined), "REASON_REQUIRED");
+  assert.equal(missingText("return", ""), "REASON_REQUIRED");
+  assert.equal(missingText("reject", "Bu ma'lumotga kirishim yo'q"), null);
+  assert.equal(missingText("return", "Raisning iqtibosini qo'shing"), null);
+});
+
+test("accepting, starting and approving need no words", () => {
+  for (const action of ["accept", "start", "approve"]) {
+    assert.equal(missingText(action, ""), null, `${action} should not need text`);
+  }
+  assert.equal(missingText("frobnicate", ""), null);
 });
 
 test("approverOf falls back to the author", () => {
