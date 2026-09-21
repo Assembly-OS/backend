@@ -59,10 +59,14 @@ export async function createAssignment(
     // RETURNING, not a lookup by `code` afterwards: code carries no unique
     // constraint, so that SELECT could hand back another writer's task.
     const newId = await q.insert(
+      // The kind follows the deadline (TZ 3.1): a meeting's next step or an
+      // AI draft with a date is deadline-bound work; without one it is
+      // open-ended and reported on weekly.
       `INSERT INTO tasks (code, title, description, from_user_id, to_user_id,
                           to_department, priority, status, deadline, uyushma_id, created_at,
-                          current_stage, stage_count, reviewer_user_id)
-       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,1,1,NULL)`,
+                          current_stage, stage_count, reviewer_user_id,
+                          kind, report_rhythm)
+       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,1,1,NULL,?,?)`,
       code,
       draft.title,
       draft.description ?? null,
@@ -73,6 +77,8 @@ export async function createAssignment(
       draft.deadline ?? null,
       assignee.uyushma_id ?? null,
       stamp,
+      draft.deadline ? "MUDDATLI" : "MUDDATSIZ",
+      draft.deadline ? null : "WEEKLY",
     );
 
     await q.run(

@@ -1090,6 +1090,48 @@ CREATE TABLE IF NOT EXISTS project_documents (
 
 CREATE INDEX IF NOT EXISTS idx_project_documents ON project_documents(loyiha_id, id DESC);
 
+-- Two kinds of assignment, block 3.1 of the rebuild TZ.
+--
+-- MUDDATLI: the work is the person's own to do, so it carries a deadline and
+-- is judged against it. MUDDATSIZ: it waits on somebody outside the Assembly,
+-- so an invented deadline would only produce a false "overdue"; instead the
+-- person reports at a set rhythm, weekly or monthly, and silence past that
+-- rhythm is what gets flagged ("Jim", 3.2). Kept beside `scope`, which says
+-- how long the work is, not who it depends on.
+--
+-- `silence_from` is where the rhythm starts counting for rows that existed
+-- before it did: the day this ran, so nothing already open is declared silent
+-- on its first morning. The backfill touches only rows without a kind, so it
+-- does its work once and is a no-op on every later start.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS kind          TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS report_rhythm TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target_value  DOUBLE PRECISION;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target_unit   TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS silence_from  TEXT;
+
+UPDATE tasks
+   SET kind = CASE WHEN deadline IS NULL THEN 'MUDDATSIZ' ELSE 'MUDDATLI' END,
+       report_rhythm = CASE WHEN deadline IS NULL THEN 'WEEKLY' END,
+       silence_from = CASE WHEN deadline IS NULL
+                           THEN to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') END
+ WHERE kind IS NULL;
+
+-- The progress journal of an open-ended assignment, 3.2: what was done and
+-- what it produced are required, the rest when there is something to say.
+CREATE TABLE IF NOT EXISTS task_progress (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  task_id     INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  author_id   INTEGER NOT NULL REFERENCES users(id),
+  did         TEXT NOT NULL,
+  outcome     TEXT NOT NULL,
+  metric      DOUBLE PRECISION,
+  blocker     TEXT,
+  help_needed TEXT,
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_progress ON task_progress(task_id, id DESC);
+
 -- The memory contour, and the history of the work done against it. Chat,
 -- notifications, live-recording scratch rows and personal assistant history
 -- are left out on purpose: they are not the Assembly's record of anything.
@@ -1103,7 +1145,7 @@ BEGIN
     'meeting_projects', 'meeting_staff', 'kelishuvlar', 'kelishuv_parties',
     'klasterlar', 'project_stages', 'project_documents',
     'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
-    'tasks', 'task_events', 'task_stages'
+    'tasks', 'task_events', 'task_stages', 'task_progress'
   ] LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
     EXECUTE format(

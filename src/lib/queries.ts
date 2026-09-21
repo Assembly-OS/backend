@@ -3,6 +3,7 @@ import {
   doneSql,
   openSql,
   overdueSql,
+  silentSql,
   statusList,
   CLOSED_STATUSES,
 } from "./metrics";
@@ -56,7 +57,14 @@ const TASK_SELECT = `
          (SELECT string_agg(su.full_name, ',' ORDER BY s2.position)
             FROM task_stages s2 JOIN users su ON su.id = s2.to_user_id
            WHERE s2.task_id = t.id AND t.stage_count > 1) AS stage_names,
-         ${RETURN_COMMENT} AS return_comment
+         ${RETURN_COMMENT} AS return_comment,
+         -- The progress journal, TZ 3.2: when it was last written, the last
+         -- figure in it, and whether the work has gone quiet past its rhythm.
+         (SELECT MAX(p.created_at) FROM task_progress p WHERE p.task_id = t.id) AS last_report_at,
+         (SELECT p.metric FROM task_progress p
+           WHERE p.task_id = t.id AND p.metric IS NOT NULL
+           ORDER BY p.id DESC LIMIT 1) AS last_metric,
+         (${silentSql("t")}) AS is_silent
   FROM tasks t
   JOIN users uf ON uf.id = t.from_user_id
   JOIN users ut ON ut.id = t.to_user_id
@@ -356,6 +364,9 @@ export interface Counters {
   sentActive: number;
   sentDone: number;
   sentOverdue: number;
+  /** Open-ended work gone quiet past its rhythm: mine, and what I handed out. */
+  silent: number;
+  sentSilent: number;
   unread: number;
   team: number;
 }
@@ -392,6 +403,8 @@ export async function counters(userId: number): Promise<Counters> {
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${openSql()}) AS "sentActive",
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${doneSql()}) AS "sentDone",
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${overdueSql()}) AS "sentOverdue",
+       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND ${silentSql()}) AS silent,
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${silentSql()}) AS "sentSilent",
        ${UNREAD_TOTAL} AS unread,
        (SELECT COUNT(*) FROM users WHERE manager_id = ? AND is_active = 1) AS team`,
     userId,
@@ -405,6 +418,8 @@ export async function counters(userId: number): Promise<Counters> {
     userId,
     userId,
     day, // sentOverdue
+    userId, // silent
+    userId, // sentSilent
     userId,
     userId,
     userId,
@@ -422,6 +437,8 @@ export async function counters(userId: number): Promise<Counters> {
       sentActive: 0,
       sentDone: 0,
       sentOverdue: 0,
+      silent: 0,
+      sentSilent: 0,
       unread: 0,
       team: 0,
     }

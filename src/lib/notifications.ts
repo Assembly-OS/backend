@@ -1,5 +1,6 @@
 import { all, get, now, run } from "./pg";
 import { notifyBot } from "./notify-bot";
+import { silentSince, silentSql } from "./metrics";
 
 /**
  * Notifications — the bell, and what rings it.
@@ -214,7 +215,63 @@ export async function sweepReminders(): Promise<number> {
     });
     fired++;
   }
-  return fired + (await sweepKelishuvTerms());
+  return fired + (await sweepKelishuvTerms()) + (await sweepSilentTasks());
+}
+
+/* ------------------------------------------------------------------ */
+/* Open-ended work gone quiet                                          */
+/* ------------------------------------------------------------------ */
+
+const SILENT_LABELS: Record<string, string> = {
+  uz: "Topshiriq bo'yicha hisobot kelmadi",
+  uzc: "Топшириқ бўйича ҳисобот келмади",
+  ru: "По поручению нет отчёта",
+  en: "No report on an assignment",
+};
+
+/**
+ * Tells the person holding an open-ended assignment, and the person who handed
+ * it out, when it has gone quiet past its rhythm — TZ block 3.2: "vazifa «Jim»
+ * holatiga o'tadi va mas'ul hamda rahbarga bildirishnoma ketadi".
+ *
+ * Once per silence: the notice is keyed on the moment the report clock last
+ * restarted, so a report written today closes this silence, and only a new one
+ * after it can ring again.
+ */
+async function sweepSilentTasks(): Promise<number> {
+  const rows = await all<{
+    id: number;
+    code: string;
+    title: string;
+    from_user_id: number;
+    to_user_id: number;
+    since: string;
+  }>(
+    `SELECT id, code, title, from_user_id, to_user_id, (${silentSince()}) AS since
+       FROM tasks
+      WHERE ${silentSql()}
+      ORDER BY id
+      LIMIT 200`,
+  );
+
+  let fired = 0;
+  for (const row of rows) {
+    for (const userId of new Set([row.to_user_id, row.from_user_id])) {
+      const label = SILENT_LABELS[await langOf(userId)] ?? SILENT_LABELS.uz;
+      const sent = await notify({
+        userId,
+        kind: "task",
+        title: `${label} · ${row.code}`,
+        body: row.title,
+        href: userId === row.to_user_id ? "/tasks/execute" : "/tasks/assign",
+        entity: `task_silent:${row.since}`,
+        entityId: row.id,
+        push: true,
+      });
+      if (sent) fired++;
+    }
+  }
+  return fired;
 }
 
 /* ------------------------------------------------------------------ */

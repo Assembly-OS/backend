@@ -116,6 +116,15 @@ export interface Task {
   stage_count: number;
   /** Who approves the CURRENT stage. NULL = the author, as it always was. */
   reviewer_user_id: number | null;
+  /** Deadline-bound or open-ended, TZ block 3.1. */
+  kind: TaskKind;
+  /** How often open-ended work is reported on. NULL on deadline-bound work. */
+  report_rhythm: ReportRhythm | null;
+  /** The figure open-ended work is aiming at, when it has one. */
+  target_value: number | null;
+  target_unit: string | null;
+  /** Where the rhythm starts counting for work that predates it. */
+  silence_from: string | null;
 }
 
 /**
@@ -164,6 +173,12 @@ export interface TaskRow extends Task {
   /** When the report credits this person with finishing it. Set only by
    *  `completedTasks`; absent on every list of the assignment pipeline. */
   completed_at?: string | null;
+  /** The newest entry in the progress journal, if any. */
+  last_report_at: string | null;
+  /** The newest figure reported, for progress against `target_value`. */
+  last_metric: number | null;
+  /** Open-ended, taken on, and quiet past its rhythm — "Jim". */
+  is_silent: boolean;
 }
 
 /**
@@ -222,6 +237,17 @@ export const MANAGER_ROLES: Role[] = [
  */
 export const TASK_SCOPES = ["HAFTALIK", "UMUMIY"] as const;
 export type TaskScope = (typeof TASK_SCOPES)[number];
+
+/**
+ * TZ block 3.1. MUDDATLI: the execution is the person's own, so it has a
+ * deadline. MUDDATSIZ: it depends on an outside party, so it has a report
+ * rhythm instead, and silence past the rhythm is what gets flagged.
+ */
+export const TASK_KINDS = ["MUDDATLI", "MUDDATSIZ"] as const;
+export type TaskKind = (typeof TASK_KINDS)[number];
+
+export const REPORT_RHYTHMS = ["WEEKLY", "MONTHLY"] as const;
+export type ReportRhythm = (typeof REPORT_RHYTHMS)[number];
 
 export function isManager(role: Role): boolean {
   return MANAGER_ROLES.includes(role);

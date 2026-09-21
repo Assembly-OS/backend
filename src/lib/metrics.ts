@@ -127,6 +127,51 @@ export function overdueSql(alias = ""): string {
   );
 }
 
+/**
+ * Where open-ended work owes reports: taken on and not handed in. Before it is
+ * accepted nobody owes anything yet; once submitted, the reviewer holds it.
+ */
+export const REPORTING_STATUSES: TaskStatus[] = [
+  "QABUL_QILINDI",
+  "BAJARILMOQDA",
+  "QAYTARILDI",
+];
+
+/**
+ * When the report clock of a task last restarted: the newest of its last
+ * journal entry, its acceptance, the day the rhythm started counting for work
+ * that predates it, and its creation. **Consumes no `?`.**
+ *
+ * The outer table is always named. Without an alias the caller's query reads
+ * `FROM tasks`, and inside the journal subquery a bare `id` would silently
+ * mean the journal row's id rather than the task's.
+ */
+export function silentSince(alias = ""): string {
+  const outer = alias || "tasks";
+  return (
+    `GREATEST((SELECT MAX(p.created_at) FROM task_progress p WHERE p.task_id = ${outer}.id),` +
+    ` ${outer}.accepted_at, ${outer}.silence_from, ${outer}.created_at)`
+  );
+}
+
+/**
+ * Open-ended, taken on, and quiet past its rhythm — "Jim", TZ block 3.2.
+ * **Consumes no `?`.**
+ *
+ * Derived, never stored, like "overdue": a report written a minute ago lifts
+ * it at once, with nothing to reset. Not a kind of lateness — the TZ asks for
+ * it to be counted and coloured on its own — which is why it is a separate
+ * fragment rather than a branch inside `overdueSql`.
+ */
+export function silentSql(alias = ""): string {
+  const outer = alias || "tasks";
+  return (
+    `${outer}.kind = 'MUDDATSIZ' AND ${outer}.status IN (${list(REPORTING_STATUSES)})` +
+    ` AND (${silentSince(alias)})::timestamp < (now() AT TIME ZONE 'UTC')` +
+    ` - CASE ${outer}.report_rhythm WHEN 'MONTHLY' THEN interval '30 days' ELSE interval '7 days' END`
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Scope — what a number is counting over                              */
 /* ------------------------------------------------------------------ */
@@ -168,7 +213,8 @@ export type MetricBasis =
   | "onReview"
   | "sent"
   | "unread"
-  | "team";
+  | "team"
+  | "silent";
 
 /** One figure the interface shows, and what it is counting over. */
 export interface MetricMeta {
@@ -197,6 +243,8 @@ export const METRICS: Record<string, MetricMeta> = {
   sentActive: { key: "sentActive", scope: "personal", basis: "open" },
   sentDone: { key: "sentDone", scope: "personal", basis: "done" },
   sentOverdue: { key: "sentOverdue", scope: "personal", basis: "overdue" },
+  silent: { key: "silent", scope: "personal", basis: "silent" },
+  sentSilent: { key: "sentSilent", scope: "personal", basis: "silent" },
   unread: { key: "unread", scope: "personal", basis: "unread" },
   team: { key: "team", scope: "team", basis: "team" },
 
