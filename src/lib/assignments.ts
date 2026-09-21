@@ -1,8 +1,9 @@
 import { get, now, tx } from "@/lib/pg";
 import { publish } from "@/lib/events";
 import { notify } from "@/lib/notifications";
+import { priorityRefusal, priorityRoom } from "@/lib/priority-limits";
 import { assignableUsers } from "@/lib/queries";
-import type { User } from "@/lib/types";
+import type { Priority, User } from "@/lib/types";
 
 export interface AssignmentDraft {
   toUserId: number;
@@ -43,6 +44,14 @@ export async function createAssignment(
   ) {
     throw new Error("Bu xodimga topshiriq berish huquqi yo'q");
   }
+
+  // The priority limits hold here too (TZ 3.5), for the same reason.
+  const refusal = priorityRefusal(
+    (draft.priority ?? "ORTA") as Priority,
+    await priorityRoom(author.id),
+  );
+  if (refusal === "KRITIK_LIMIT") throw new Error("Kritik topshiriqlar chegarasi to'lgan");
+  if (refusal === "YUQORI_LIMIT") throw new Error("«Yuqori» topshiriqlar ulushi chegarasi to'lgan");
 
   const seq =
     Number(

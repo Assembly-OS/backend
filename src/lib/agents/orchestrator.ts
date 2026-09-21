@@ -1,5 +1,7 @@
 import { all, get, insert, now, run } from "@/lib/pg";
 import { notifyBot } from "@/lib/notify-bot";
+import { priorityRefusal, priorityRoom } from "@/lib/priority-limits";
+import type { Priority } from "@/lib/types";
 import { analyze, type Finding } from "./analyzers";
 import { createTaskFromProposal } from "./intake-runner";
 import { summarize } from "./claude";
@@ -315,6 +317,21 @@ export async function decideProposal(
       proposalId,
     );
     return { ok: false, error: "OUT_OF_SCOPE" };
+  }
+
+  // TZ 3.5, checked before anything runs: a draft over the priority limits
+  // is refused and stays pending, so the reviewer can lower its priority and
+  // approve again instead of losing the proposal to "failed".
+  if (proposal.action === "suggest_task" && proposal.owner_user_id) {
+    let drafted: unknown;
+    try {
+      drafted = proposal.payload ? JSON.parse(proposal.payload).priority : undefined;
+    } catch {
+      drafted = undefined;
+    }
+    const priority = String(edits?.priority ?? drafted ?? "ORTA") as Priority;
+    const refusal = priorityRefusal(priority, await priorityRoom(proposal.owner_user_id));
+    if (refusal) return { ok: false, error: refusal };
   }
 
   let result = "qayd etildi";

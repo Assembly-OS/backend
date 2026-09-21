@@ -4,6 +4,7 @@ import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { notifyBot } from "@/lib/notify-bot";
 import { assignableUsers } from "@/lib/queries";
+import { priorityRefusal, priorityRoom } from "@/lib/priority-limits";
 import { id, oneOf, str } from "@/lib/validate";
 import {
   PRIORITIES,
@@ -94,6 +95,9 @@ export async function POST(request: Request) {
     first.toUserId,
   ))!;
   const priority = oneOf(body.priority, PRIORITIES, "ORTA");
+  // TZ 3.5: the same rule the form uses to disable the options.
+  const refusal = priorityRefusal(priority, await priorityRoom(user.id));
+  if (refusal) return NextResponse.json({ error: refusal }, { status: 409 });
   // Weekly unless the author says otherwise: most assignments are errands,
   // and defaulting the other way would file every one of them under long work.
   const scope = oneOf(body.scope, TASK_SCOPES, "HAFTALIK");
