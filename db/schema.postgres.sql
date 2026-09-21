@@ -1070,6 +1070,26 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- A project's documents, the last field of the passport in block 1.3: the
+-- master plan, the feasibility study (TIA), the ESG assessment, the legal
+-- papers. Optional in the TZ, and kept as their own rows because a project
+-- has several of each kind over its life. Removing one is a DELETE, which the
+-- archive trigger below copies whole, and the file itself stays on disk.
+CREATE TABLE IF NOT EXISTS project_documents (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  loyiha_id   INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  -- MASTER_PLAN | TIA | ESG | LEGAL | OTHER
+  kind        TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  file_key    TEXT NOT NULL,
+  file_name   TEXT NOT NULL,
+  file_size   INTEGER NOT NULL,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_documents ON project_documents(loyiha_id, id DESC);
+
 -- The memory contour, and the history of the work done against it. Chat,
 -- notifications, live-recording scratch rows and personal assistant history
 -- are left out on purpose: they are not the Assembly's record of anything.
@@ -1081,7 +1101,7 @@ BEGIN
     'loyihalar', 'project_threads', 'thread_entries',
     'meetings', 'meeting_conclusions', 'meeting_memory',
     'meeting_projects', 'meeting_staff', 'kelishuvlar', 'kelishuv_parties',
-    'klasterlar', 'project_stages',
+    'klasterlar', 'project_stages', 'project_documents',
     'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
     'tasks', 'task_events', 'task_stages'
   ] LOOP
