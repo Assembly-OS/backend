@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { projectRights } from "@/lib/project-visibility";
 import { currentUser } from "@/lib/session";
-import { canWrite } from "@/lib/crm-access";
+import { canRead, canWrite } from "@/lib/crm-access";
 import {
   AGREEMENT_STATUSES,
   PRIORITIES,
@@ -13,6 +13,9 @@ import { id as parseId, oneOf, str } from "@/lib/validate";
 export async function GET(request: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
+  // The companies and agreements base is the staff's (TZ 4.3).
+  if (!canRead(user))
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
   const mine = new URL(request.url).searchParams.get("mine") === "1";
   return NextResponse.json(await agreementBoard(mine ? user.id : undefined));
 }

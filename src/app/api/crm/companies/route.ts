@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
-import { canWrite } from "@/lib/crm-access";
+import { canRead, canWrite } from "@/lib/crm-access";
 import { COMPANY_STATUSES, companies, createCompany } from "@/lib/crm";
 import { id as parseId, oneOf, str } from "@/lib/validate";
 
@@ -8,6 +8,9 @@ import { id as parseId, oneOf, str } from "@/lib/validate";
 export async function GET(request: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
+  // The companies and agreements base is the staff's (TZ 4.3).
+  if (!canRead(user))
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const url = new URL(request.url);
   return NextResponse.json({

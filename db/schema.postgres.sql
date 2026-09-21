@@ -1195,6 +1195,38 @@ BEGIN
 END;
 $$;
 
+-- TZ 4.4: the audit trail. Who did what, when: every create, change and
+-- delete (written by the trigger below), and every question put to the
+-- global AI view (written by the assistant). Read by the chairman and AI Lab
+-- only; never changed and never deleted — the trigger refuses both, whoever
+-- asks, so "the journal is not deleted" does not rest on the code being kind.
+-- `actor_id` has no foreign key on purpose: a removed account's history is
+-- exactly what the journal is for.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  at        TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  actor_id  INTEGER,
+  -- INSERT | UPDATE | DELETE | AI_GLOBAL
+  action    TEXT NOT NULL,
+  -- The table written, or 'assistant' for an AI question.
+  entity    TEXT NOT NULL,
+  entity_id TEXT,
+  detail    JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at     ON audit_log(id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_actor  ON audit_log(actor_id, id DESC);
+
+CREATE OR REPLACE FUNCTION audit_log_is_append_only() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_log is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS audit_log_append_only ON audit_log;
+CREATE TRIGGER audit_log_append_only BEFORE UPDATE OR DELETE ON audit_log
+  FOR EACH ROW EXECUTE FUNCTION audit_log_is_append_only();
+
 -- The memory contour, and the history of the work done against it. Chat,
 -- notifications, live-recording scratch rows and personal assistant history
 -- are left out on purpose: they are not the Assembly's record of anything.
@@ -1215,6 +1247,78 @@ BEGIN
     EXECUTE format(
       'CREATE TRIGGER archive_on_delete BEFORE DELETE ON %I '
       'FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()', t);
+  END LOOP;
+END;
+$$;
+
+-- TZ 4.4: every create, change and delete, written by the database so no
+-- route can forget one. The author is `app.user_id`, which the write path
+-- sets from the session (lib/pg.ts, `sessionActor`); a write outside any
+-- request — the bot, a migration — is recorded with no author, which is true.
+--
+-- What is kept is what changed, and never a secret: a password shows only as
+-- changed, and text longer than 2000 characters (a transcript, a file's
+-- extracted text) is cut to its opening, with its length — the row itself
+-- still holds it. A touch of `last_seen` alone is not a change anybody made.
+CREATE OR REPLACE FUNCTION audit_value(key TEXT, value JSONB) RETURNS JSONB AS $$
+  SELECT CASE
+    WHEN key = 'password_hash' THEN to_jsonb('***'::text)
+    WHEN jsonb_typeof(value) = 'string' AND length(value #>> '{}') > 2000
+      THEN to_jsonb(left(value #>> '{}', 200) || '… (' || length(value #>> '{}') || ')')
+    ELSE value
+  END;
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION audit_row() RETURNS trigger AS $$
+DECLARE
+  actor   INTEGER := NULLIF(current_setting('app.user_id', true), '')::INTEGER;
+  payload JSONB;
+  row_id  TEXT;
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    SELECT jsonb_object_agg(n.key, jsonb_build_object(
+             'from', audit_value(n.key, o.value), 'to', audit_value(n.key, n.value)))
+      INTO payload
+      FROM jsonb_each(to_jsonb(NEW)) n
+      JOIN jsonb_each(to_jsonb(OLD)) o ON o.key = n.key
+     WHERE n.value IS DISTINCT FROM o.value AND n.key NOT IN ('last_seen');
+    IF payload IS NULL THEN RETURN NULL; END IF;
+    row_id := to_jsonb(NEW) ->> 'id';
+  ELSIF TG_OP = 'INSERT' THEN
+    SELECT jsonb_object_agg(key, audit_value(key, value)) INTO payload
+      FROM jsonb_each(to_jsonb(NEW)) WHERE key NOT IN ('last_seen');
+    row_id := to_jsonb(NEW) ->> 'id';
+  ELSE
+    SELECT jsonb_object_agg(key, audit_value(key, value)) INTO payload
+      FROM jsonb_each(to_jsonb(OLD)) WHERE key NOT IN ('last_seen');
+    row_id := to_jsonb(OLD) ->> 'id';
+  END IF;
+  INSERT INTO audit_log (actor_id, action, entity, entity_id, detail)
+  VALUES (actor, TG_OP, TG_TABLE_NAME, row_id, payload);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- The Assembly's records and who may use them. Chat, notifications, the
+-- assistant's history and the agents' run logs are left out on purpose: they
+-- are either private conversation or a log of their own.
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'users', 'uyushmalar', 'klasterlar',
+    'loyihalar', 'project_members', 'project_threads', 'thread_entries',
+    'thread_members', 'project_stages', 'project_documents',
+    'meetings', 'meeting_projects', 'meeting_staff',
+    'kelishuvlar', 'kelishuv_parties', 'agreements',
+    'partners', 'contacts', 'partner_notes',
+    'tasks', 'task_stages', 'task_progress'
+  ] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS audit_on_write ON %I', t);
+    EXECUTE format(
+      'CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON %I '
+      'FOR EACH ROW EXECUTE FUNCTION audit_row()', t);
   END LOOP;
 END;
 $$;

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { all, now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
-import { thread, THREAD_PAGE, userByLogin } from "@/lib/queries";
+import { canMessage, thread, THREAD_PAGE, userByLogin } from "@/lib/queries";
 import { str } from "@/lib/validate";
 
 async function resolve(loginParam: string) {
@@ -13,6 +13,9 @@ async function resolve(loginParam: string) {
     return { error: NextResponse.json({ error: "NOT_FOUND" }, { status: 404 }) };
   if (other.id === user.id)
     return { error: NextResponse.json({ error: "SELF" }, { status: 400 }) };
+  // Someone outside the Assembly writes to his contacts only (TZ 4.3).
+  if (!(await canMessage(user, other)))
+    return { error: NextResponse.json({ error: "NOT_FOUND" }, { status: 404 }) };
   return { user, other };
 }
 

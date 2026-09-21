@@ -26,7 +26,10 @@ import { isExternal, type User } from "./types";
 
 export type CrmRole = "admin" | "manager" | "employee" | "outside";
 
-export function crmRole(user: User): CrmRole {
+/** All a CRM check needs to know about a person. */
+type CrmUser = Pick<User, "role" | "login">;
+
+export function crmRole(user: CrmUser): CrmRole {
   // The same chairman-and-assistant pair the rest of the platform uses; the
   // list of logins lives in lib/oversight.ts so there is only one of it.
   if (seesEverything(user)) return "admin";
@@ -41,16 +44,16 @@ export function crmRole(user: User): CrmRole {
 }
 
 /** Every member of staff may read the directory; nobody outside it. */
-export function canRead(user: User): boolean {
+export function canRead(user: CrmUser): boolean {
   return crmRole(user) !== "outside";
 }
 
-export function canWrite(user: User): boolean {
+export function canWrite(user: CrmUser): boolean {
   const role = crmRole(user);
   return role === "admin" || role === "manager";
 }
 
-export function canDelete(user: User): boolean {
+export function canDelete(user: CrmUser): boolean {
   return crmRole(user) === "admin";
 }
 
@@ -58,6 +61,9 @@ export function canDelete(user: User): boolean {
  * Closing or reopening one agreement. Managers may settle anything; an
  * employee may settle what was put on them, and nothing else.
  */
-export function canSettle(user: User, ownerUserId: number | null): boolean {
+export function canSettle(
+  user: CrmUser & Pick<User, "id">,
+  ownerUserId: number | null,
+): boolean {
   return canWrite(user) || ownerUserId === user.id;
 }

@@ -362,23 +362,65 @@ export interface DirectoryEntry {
   group: string;
 }
 
-/** Everyone a user can start a conversation with — the whole active staff. */
-export async function directory(excludeId: number): Promise<DirectoryEntry[]> {
+/**
+ * SQL: the people someone outside the Assembly may talk to (TZ 4.3, "writing
+ * to the Assembly's responsible person"): the member of staff they deal with
+ * (their `manager_id`), the leads of their own project, and the rest of their
+ * own association. Everyone else — the staff list itself — is closed to them.
+ */
+function contactsOf(viewer: User): { sql: string; params: (number | null)[] } {
+  return {
+    sql: `(u.id = ?
+           OR u.id IN (SELECT l.owner_id FROM loyihalar l
+                        JOIN project_members pm ON pm.project_id = l.id AND pm.user_id = ?
+                       UNION
+                       SELECT l.deputy_id FROM loyihalar l
+                        JOIN project_members pm ON pm.project_id = l.id AND pm.user_id = ?)
+           OR (u.uyushma_id = ? AND u.role IN ('UYUSHMA_RAISI', 'UYUSHMA_VAKILI')))`,
+    params: [viewer.manager_id ?? -1, viewer.id, viewer.id, viewer.uyushma_id ?? -1],
+  };
+}
+
+/**
+ * Everyone a user can start a conversation with: for the staff, the whole
+ * active staff and the Assembly's outside contacts; for someone outside it,
+ * their contacts only.
+ */
+export async function directory(viewer: User): Promise<DirectoryEntry[]> {
+  const scope = isExternal(viewer.role)
+    ? contactsOf(viewer)
+    : { sql: "TRUE", params: [] };
   return await all<DirectoryEntry>(
-    `SELECT id, login, full_name, role, department, position,
-            CASE role
+    `SELECT u.id, u.login, u.full_name, u.role, u.department, u.position,
+            CASE u.role
               WHEN 'RAIS' THEN 'RAIS'
               WHEN 'LOYIHA_RAHBARI' THEN 'LOYIHA'
+              WHEN 'TASHQI_LOYIHA_RAHBARI' THEN 'TASHQI'
               WHEN 'UYUSHMA_RAISI' THEN 'UYUSHMA'
-              ELSE COALESCE(department, 'RAIS')
+              WHEN 'UYUSHMA_VAKILI' THEN 'UYUSHMA'
+              ELSE COALESCE(u.department, 'RAIS')
             END AS "group"
-     FROM users
-     WHERE is_active = 1 AND id != ?
-     ORDER BY CASE role
+     FROM users u
+     WHERE u.is_active = 1 AND u.id != ? AND ${scope.sql}
+     ORDER BY CASE u.role
                 WHEN 'RAIS' THEN 0 WHEN 'BOLIM_RAHBARI' THEN 1 WHEN 'AI_LAB' THEN 2
                 ELSE 3 END,
-              full_name`,
-    excludeId,
+              u.full_name`,
+    viewer.id,
+    ...scope.params,
+  );
+}
+
+/** Whether `viewer` may write to `other` directly (TZ 4.3). */
+export async function canMessage(viewer: User, other: User): Promise<boolean> {
+  if (!isExternal(viewer.role)) return true;
+  const scope = contactsOf(viewer);
+  return Boolean(
+    await get(
+      `SELECT 1 FROM users u WHERE u.id = ? AND u.is_active = 1 AND ${scope.sql}`,
+      other.id,
+      ...scope.params,
+    ),
   );
 }
 

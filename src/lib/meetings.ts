@@ -1,7 +1,8 @@
 import { all, get, now, run, type Tx } from "./pg";
 import { projectOptions } from "./project-visibility";
+import { meetingScope, type MeetingViewer } from "./meeting-visibility";
 import { assignableUsers } from "./queries";
-import type { User } from "./types";
+import { EXTERNAL_ROLES, isExternal, type User } from "./types";
 import {
   forEmpty,
   parseSuggestion,
@@ -205,15 +206,20 @@ function likePattern(text: string): string {
  * every meeting comes back by date". Paged on the server: this list grows by
  * the week and an unbounded one becomes a very long page on a phone.
  */
-export async function searchMeetings(filter: {
-  query?: string;
-  companyId?: number | null;
-  projectId?: number | null;
-  lang?: "uz" | "ru" | "en";
-  page?: number;
-}): Promise<{ rows: MeetingListRow[]; total: number }> {
-  const where: string[] = [];
-  const params: (string | number)[] = [];
+export async function searchMeetings(
+  filter: {
+    query?: string;
+    companyId?: number | null;
+    projectId?: number | null;
+    lang?: "uz" | "ru" | "en";
+    page?: number;
+  },
+  /** Whose register it is: only meetings this person may read (TZ 4.2). */
+  viewer: MeetingViewer,
+): Promise<{ rows: MeetingListRow[]; total: number }> {
+  const scope = meetingScope(viewer);
+  const where: string[] = [scope.sql];
+  const params: (string | number)[] = scope.params as (string | number)[];
 
   const query = filter.query?.trim();
   if (query) {
@@ -333,7 +339,12 @@ type Option = { id: number; label: string; hint?: string | null };
  * Two different lists of people, on purpose. Who may be named responsible is
  * who the author may assign to, because the next step becomes their
  * assignment. Who may be marked as having been in the room is anyone active —
- * the chairman included, who attends meetings but receives no assignments.
+ * the chairman included, who attends meetings but receives no assignments —
+ * and only members of staff: the Assembly's outside contacts are not "our
+ * side of the table".
+ *
+ * Someone outside the Assembly gets none of the lists that come from the
+ * companies base or the staff list (TZ 4.3), and only his own association.
  */
 export async function meetingFormOptions(user: User): Promise<{
   companies: Option[];
@@ -342,20 +353,28 @@ export async function meetingFormOptions(user: User): Promise<{
   projects: Option[];
   uyushmalar: Option[];
 }> {
+  const outside = isExternal(user.role);
   const [companyRows, assignable, people, projectRows, uyushmaRows] =
     await Promise.all([
-      all<{ id: number; name: string }>(
-        "SELECT id, name FROM partners ORDER BY name",
-      ),
+      outside
+        ? Promise.resolve([])
+        : all<{ id: number; name: string }>("SELECT id, name FROM partners ORDER BY name"),
       assignableUsers(user),
-      all<{ id: number; full_name: string; position: string | null }>(
-        "SELECT id, full_name, position FROM users WHERE is_active = 1 ORDER BY full_name",
-      ),
+      outside
+        ? Promise.resolve([])
+        : all<{ id: number; full_name: string; position: string | null }>(
+            `SELECT id, full_name, position FROM users
+              WHERE is_active = 1 AND role NOT IN (${EXTERNAL_ROLES.map((role) => `'${role}'`).join(",")})
+              ORDER BY full_name`,
+          ),
       // Only projects the author can see may be linked (TZ 4.2).
       projectOptions(user),
-      all<{ id: number; name: string }>(
-        "SELECT id, name FROM uyushmalar ORDER BY name",
-      ),
+      outside
+        ? all<{ id: number; name: string }>(
+            "SELECT id, name FROM uyushmalar WHERE id = ?",
+            user.uyushma_id ?? -1,
+          )
+        : all<{ id: number; name: string }>("SELECT id, name FROM uyushmalar ORDER BY name"),
     ]);
 
   return {

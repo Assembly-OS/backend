@@ -1,9 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { all, get } from "@/lib/pg";
+import { all, get, type Param } from "@/lib/pg";
 import { isConfigured } from "./claude";
 import { today, viewStatus } from "@/lib/crm";
-import { assignableUsers } from "@/lib/queries";
-import type { User } from "@/lib/types";
+import { canRead } from "@/lib/crm-access";
+import { logGlobalQuestion } from "@/lib/audit";
+import { meetingScope } from "@/lib/meeting-visibility";
+import { globalAi } from "@/lib/permissions";
+import { assignableUsers, directory } from "@/lib/queries";
+import { isExternal, type User } from "@/lib/types";
 
 /**
  * The assistant that answers questions about what is in the database.
@@ -208,6 +212,13 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
 
 interface ToolContext {
   user: User;
+  /**
+   * TZ 4.2's "global AI, full view": the chairman's side, and a department
+   * head the chairman has granted it. Everyone else is answered from what he
+   * can see on the platform itself — the same scopes the pages use — so a
+   * question cannot reach what a link would not.
+   */
+  global: boolean;
   /** 'uz' | 'ru' | 'en' — which language column to read conclusions from. */
   lang: string;
   refs: Ref[];
@@ -230,6 +241,8 @@ async function runTool(
 ): Promise<unknown> {
   switch (name) {
     case "find_companies": {
+      // The companies base is the staff's (TZ 4.3).
+      if (!context.global && !canRead(context.user)) return { error: "not_available" };
       const where: string[] = [];
       const params: (string | number)[] = [];
       if (input.query) {
@@ -263,6 +276,8 @@ async function runTool(
     }
 
     case "company_profile": {
+      // The companies base is the staff's (TZ 4.3).
+      if (!context.global && !canRead(context.user)) return { error: "not_available" };
       const id = Number(input.company_id);
       const company = await get<Record<string, unknown>>(
         "SELECT * FROM partners WHERE id = ?",
@@ -276,16 +291,18 @@ async function runTool(
         href: `/companies/${id}`,
       });
 
+      const seen = meetingsOf(context);
       const meetings = await all<Record<string, unknown>>(
         `SELECT m.id, m.title, COALESCE(m.held_at, m.created_at) AS date,
                 m.participants, c.summary
            FROM meetings m
            LEFT JOIN meeting_conclusions c
                   ON c.meeting_id = m.id AND c.lang = ?
-          WHERE m.company_id = ?
+          WHERE m.company_id = ? AND ${seen.sql}
           ORDER BY COALESCE(m.held_at, m.created_at) DESC LIMIT 10`,
         context.lang,
         id,
+        ...seen.params,
       );
       for (const row of meetings) {
         remember(context, {
@@ -309,8 +326,9 @@ async function runTool(
     }
 
     case "find_meetings": {
-      const where: string[] = [];
-      const params: (string | number)[] = [];
+      const seen = meetingsOf(context);
+      const where: string[] = [seen.sql];
+      const params: (string | number)[] = seen.params as (string | number)[];
       if (input.query) {
         where.push("(m.title ILIKE ? OR m.transcript ILIKE ?)");
         params.push(like(input.query), like(input.query));
@@ -354,13 +372,15 @@ async function runTool(
 
     case "meeting_detail": {
       const id = Number(input.meeting_id);
+      const seen = meetingsOf(context);
       const meeting = await get<Record<string, unknown>>(
         `SELECT m.id, m.title, COALESCE(m.held_at, m.created_at) AS date,
                 m.place, m.participants, m.description, m.next_steps,
                 p.name AS company, m.company_id
            FROM meetings m LEFT JOIN partners p ON p.id = m.company_id
-          WHERE m.id = ?`,
+          WHERE m.id = ? AND ${seen.sql}`,
         id,
+        ...seen.params,
       );
       if (!meeting) return { error: "not_found" };
       remember(context, {
@@ -390,13 +410,16 @@ async function runTool(
       const where: string[] = [];
       const params: (string | number)[] = [];
       // Scoping, not filtering: a manager sees their people's work, everyone
-      // else sees their own. Enforced here so no prompt can widen it.
-      const visible = (await assignableUsers(context.user)).map((person) => person.id);
-      const scope = [...new Set([context.user.id, ...visible])];
-      where.push(
-        `(t.to_user_id IN (${scope.map(() => "?").join(",")}) OR t.from_user_id = ?)`,
-      );
-      params.push(...scope, context.user.id);
+      // else sees their own. Enforced here so no prompt can widen it. The
+      // global view (TZ 4.2) reads every assignment.
+      if (!context.global) {
+        const visible = (await assignableUsers(context.user)).map((person) => person.id);
+        const scope = [...new Set([context.user.id, ...visible])];
+        where.push(
+          `(t.to_user_id IN (${scope.map(() => "?").join(",")}) OR t.from_user_id = ?)`,
+        );
+        params.push(...scope, context.user.id);
+      }
 
       if (input.query) {
         where.push("(t.title ILIKE ? OR t.description ILIKE ?)");
@@ -420,7 +443,7 @@ async function runTool(
            FROM tasks t
            LEFT JOIN users u ON u.id = t.to_user_id
            LEFT JOIN users f ON f.id = t.from_user_id
-          WHERE ${where.join(" AND ")}
+          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
           ORDER BY t.id DESC LIMIT 30`,
         ...params,
       );
@@ -436,11 +459,20 @@ async function runTool(
     }
 
     case "find_people": {
+      // Someone outside the Assembly is not shown the staff list (TZ 4.3):
+      // his contacts, the same people his chat offers.
+      const contacts =
+        !context.global && isExternal(context.user.role)
+          ? (await directory(context.user)).map((person) => person.id)
+          : null;
+      if (contacts && contacts.length === 0) return { people: [] };
       const rows = await all<Record<string, unknown>>(
         `SELECT id, full_name, login, role, department, position
            FROM users WHERE is_active = 1
+            ${contacts ? `AND id IN (${contacts.map(() => "?").join(",")})` : ""}
             ${input.query ? "AND (full_name ILIKE ? OR login ILIKE ? OR position ILIKE ?)" : ""}
           ORDER BY full_name LIMIT 30`,
+        ...(contacts ?? []),
         ...(input.query ? [like(input.query), like(input.query), like(input.query)] : []),
       );
       for (const row of rows) {
@@ -469,11 +501,19 @@ function safeList(value: unknown): string[] {
   }
 }
 
+/** The meetings this question may read: all of them for the global view,
+ *  otherwise the person's own register (`meetingScope`). */
+function meetingsOf(context: ToolContext): { sql: string; params: Param[] } {
+  return context.global ? { sql: "TRUE", params: [] } : meetingScope(context.user);
+}
+
 /** Shared by three tools, so "overdue" means the same thing in all of them. */
 async function agreementRows(
   input: Record<string, unknown>,
   context: ToolContext,
 ): Promise<Record<string, unknown>[]> {
+  // The agreements base is the staff's (TZ 4.3).
+  if (!context.global && !canRead(context.user)) return [];
   const where: string[] = [];
   const params: (string | number)[] = [];
 
@@ -583,9 +623,12 @@ export async function askAssistant(
 
   const context: ToolContext = {
     user,
+    global: globalAi(user),
     lang: locale === "ru" ? "ru" : locale === "en" ? "en" : "uz",
     refs: [],
   };
+  // TZ 4.2: "every global query is logged — who, when, what was asked".
+  if (context.global) await logGlobalQuestion(user.id, question);
 
   // Only the recent turns: an assistant that resends an hour of chat with
   // every question spends more on its own transcript than on the answer.

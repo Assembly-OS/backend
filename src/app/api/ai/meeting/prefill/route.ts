@@ -15,8 +15,12 @@ import { id as parseId, oneOf, str } from "@/lib/validate";
  * them". It works on a meeting not saved yet, which is when a pasted
  * transcript most needs it.
  *
- * Open to anybody who may file a meeting, like the analysis on the same form:
- * a press costs one model call, and it is logged with the agent's other runs.
+ * Open to the CRM's writers, like the analysis on the same form: a press
+ * costs one model call, and it is logged with the agent's other runs. Block 4
+ * let every member of staff file a meeting (TZ 4.2) without widening who
+ * spends model calls on one; and never to people outside the Assembly, since
+ * the proposal is made against the companies base and the staff list, which
+ * are closed to them (4.3).
  */
 export async function POST(request: Request) {
   const user = await currentUser();

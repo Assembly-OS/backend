@@ -224,3 +224,43 @@ export function may(
 ): boolean {
   return reach(user, capability) !== "no";
 }
+
+/**
+ * Where a person lands: the dashboard for the staff; for someone outside the
+ * Assembly, the one part of it that is theirs (TZ 4.3) — an outside lead's
+ * project list, an association's meetings. The dashboard's counters are the
+ * staff's work and would read zero for them forever.
+ */
+export function homePath(role: Role): string {
+  if (role === "TASHQI_LOYIHA_RAHBARI") return "/projects";
+  if (role === "UYUSHMA_RAISI" || role === "UYUSHMA_VAKILI") return "/meetings";
+  return "/dashboard";
+}
+
+/**
+ * Whether this person's AI questions read across the isolation — TZ 4.2's
+ * "global AI, full view". The chairman's column always; a department head
+ * only once the chairman has switched it on for him (`users.global_ai`),
+ * "not by role but by a separate permission, so the chairman can give it to
+ * a particular head or take it back without changing his role". A cluster
+ * head's "cluster" reach is his own scope, which already takes in the
+ * cluster's projects. Everyone else asks within his own scope.
+ */
+export function globalAi(user: Pick<User, "role" | "login" | "global_ai">): boolean {
+  const scope = reach(user, "globalAi");
+  return scope === "yes" || (scope === "grant" && user.global_ai === 1);
+}
+
+/** Whether the chairman could switch the global AI view on for this role. */
+export function grantsGlobalAi(role: Role): boolean {
+  return PERMISSIONS.globalAi[columnOf(role)] === "grant";
+}
+
+/**
+ * TZ 4.4: "the journal is open only to the chairman and the head of AI Lab".
+ * By role, deliberately without the assistant: the journal records what the
+ * chairman's side does too, and it is read by the two people the TZ names.
+ */
+export function readsAudit(role: Role): boolean {
+  return role === "RAIS" || role === "AI_LAB";
+}

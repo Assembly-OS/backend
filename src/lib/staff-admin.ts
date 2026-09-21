@@ -13,6 +13,7 @@ import {
   type Role,
 } from "./types";
 import { attach } from "./project-visibility";
+import { grantsGlobalAi } from "./permissions";
 import { LOCALES } from "./i18n/config";
 
 /**
@@ -244,6 +245,16 @@ export async function updateStaffAccount(
     return { status: 200, body: { ok: true, is_active: activate ? 1 : 0 } };
   }
 
+  if (action === "globalAi") {
+    // TZ 4.2: the global AI view is a grant the chairman's side gives a
+    // particular department head, or takes back, without touching his role.
+    if (!grantsGlobalAi(target.role)) return fail(400, "NOT_GRANTABLE");
+    const on = body.on === true;
+    await run("UPDATE users SET global_ai = ? WHERE id = ?", on ? 1 : 0, targetId);
+    publish(targetId);
+    return { status: 200, body: { ok: true, global_ai: on ? 1 : 0 } };
+  }
+
   if (action === "password") {
     const password = typeof body.password === "string" ? body.password : "";
     if (password.length < MIN_PASSWORD) return fail(400, "WEAK_PASSWORD");
@@ -289,7 +300,9 @@ export async function updateStaffAccount(
     await run(
       `UPDATE users SET full_name = ?, role = ?, department = ?, position = ?,
                         manager_id = ?, klaster_id = ?, uyushma_id = ?,
-                        phone = ?, email = ?
+                        phone = ?, email = ?,
+                        -- A grant does not outlive the role that could hold it.
+                        global_ai = CASE WHEN ? = 1 THEN global_ai ELSE 0 END
         WHERE id = ?`,
       fullName,
       role,
@@ -300,6 +313,7 @@ export async function updateStaffAccount(
       scope.uyushmaId,
       str(body.phone, 40),
       str(body.email, 120),
+      grantsGlobalAi(role) ? 1 : 0,
       targetId,
     );
     // Adds the project named in the form; projects attached from the
