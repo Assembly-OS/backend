@@ -2,7 +2,6 @@ import { actingAs } from "./archive";
 import { all, get, now, tx } from "./pg";
 import type { DocumentKind } from "./project-document-kinds";
 import type { User } from "./types";
-import { canManageProjects } from "./project-access";
 
 export {
   DOCUMENT_KINDS,
@@ -38,17 +37,6 @@ const SELECT = `
     FROM project_documents d
     LEFT JOIN users u ON u.id = d.uploaded_by
 `;
-
-export function canKeepDocuments(
-  user: User,
-  project: { owner_id: number | null; deputy_id: number | null },
-): boolean {
-  return (
-    canManageProjects(user) ||
-    project.owner_id === user.id ||
-    project.deputy_id === user.id
-  );
-}
 
 /** Newest first: the latest version of a plan is the one people open. */
 export async function documentsOf(projectId: number): Promise<ProjectDocument[]> {

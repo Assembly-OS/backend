@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { canManageProjects } from "@/lib/project-access";
+import { projectRights } from "@/lib/project-visibility";
 import {
   archiveThread,
   deleteThread,
@@ -30,7 +31,10 @@ export async function PATCH(
 
   const threadId = parseId((await params).id);
   const thread = threadId ? await threadById(threadId) : undefined;
-  if (!thread) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  // A thread of a project this person cannot see does not exist for them.
+  const rights = thread ? await projectRights(user, thread.project_id) : null;
+  if (!thread || !rights?.internal)
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const body = (await request.json()) as Record<string, unknown>;
 
@@ -78,7 +82,10 @@ export async function DELETE(
   const threadId = parseId((await params).id);
   if (!threadId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
   const thread = await threadById(threadId);
-  if (!thread) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  // A thread of a project this person cannot see does not exist for them.
+  const rights = thread ? await projectRights(user, thread.project_id) : null;
+  if (!thread || !rights?.internal)
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   await deleteThread(thread.id, user.id);
   return NextResponse.json({ ok: true });

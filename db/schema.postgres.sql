@@ -1132,6 +1132,69 @@ CREATE TABLE IF NOT EXISTS task_progress (
 
 CREATE INDEX IF NOT EXISTS idx_task_progress ON task_progress(task_id, id DESC);
 
+-- Block 4.1: roles. A cluster head is scoped by the cluster they head, the
+-- two association roles by `uyushma_id` (which was already there), and the
+-- global AI view is a grant the chairman switches on per person rather than a
+-- property of a role (4.2: "not by role, by a separate permission").
+ALTER TABLE users ADD COLUMN IF NOT EXISTS klaster_id INTEGER
+  REFERENCES klasterlar(id) ON DELETE SET NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS global_ai INTEGER NOT NULL DEFAULT 0;
+
+-- Who is attached to a project (4.2: staff see "attached" projects). The
+-- project's owner and deputy are attached by those columns and need no row
+-- here; everyone else — a colleague on the work, an outside project lead —
+-- has one. Assigning work on a project attaches its assignee.
+CREATE TABLE IF NOT EXISTS project_members (
+  project_id INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  added_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  PRIMARY KEY (project_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
+
+-- Data changes that must run exactly once, recorded by name. A backfill that
+-- re-ran on every start would quietly re-attach whoever was detached since.
+CREATE TABLE IF NOT EXISTS schema_once (
+  key    TEXT PRIMARY KEY,
+  ran_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+-- Closing project visibility (4.2, the owner's call: strictly as the TZ says)
+-- must not hide a project from the people already working on it. So everyone
+-- the record shows at work on a project is attached to it first: whoever gave,
+-- took or reviewed an assignment on it, wrote in its journal or follows a
+-- thread, sat in one of its meetings, answers for one of its agreements.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_once WHERE key = 'project_members_backfill') THEN
+    INSERT INTO project_members (project_id, user_id)
+    SELECT DISTINCT links.project_id, links.user_id
+      FROM (
+        SELECT loyiha_id AS project_id, to_user_id AS user_id FROM tasks
+        UNION SELECT loyiha_id, from_user_id FROM tasks
+        UNION SELECT loyiha_id, reviewer_user_id FROM tasks
+        UNION SELECT t.loyiha_id, s.to_user_id
+                FROM task_stages s JOIN tasks t ON t.id = s.task_id
+        UNION SELECT th.project_id, e.author_id
+                FROM thread_entries e JOIN project_threads th ON th.id = e.thread_id
+        UNION SELECT th.project_id, m.user_id
+                FROM thread_members m JOIN project_threads th ON th.id = m.thread_id
+        UNION SELECT mp.project_id, ms.user_id
+                FROM meeting_projects mp JOIN meeting_staff ms ON ms.meeting_id = mp.meeting_id
+        UNION SELECT loyiha_id, responsible_id FROM kelishuvlar
+        UNION SELECT loyiha_id, id FROM users
+      ) links
+     WHERE links.project_id IS NOT NULL AND links.user_id IS NOT NULL
+       -- tasks.loyiha_id and users.loyiha_id carry no foreign key.
+       AND EXISTS (SELECT 1 FROM loyihalar l WHERE l.id = links.project_id)
+       AND EXISTS (SELECT 1 FROM users u WHERE u.id = links.user_id)
+    ON CONFLICT DO NOTHING;
+    INSERT INTO schema_once (key) VALUES ('project_members_backfill');
+  END IF;
+END;
+$$;
+
 -- The memory contour, and the history of the work done against it. Chat,
 -- notifications, live-recording scratch rows and personal assistant history
 -- are left out on purpose: they are not the Assembly's record of anything.
@@ -1145,7 +1208,8 @@ BEGIN
     'meeting_projects', 'meeting_staff', 'kelishuvlar', 'kelishuv_parties',
     'klasterlar', 'project_stages', 'project_documents',
     'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
-    'tasks', 'task_events', 'task_stages', 'task_progress'
+    'tasks', 'task_events', 'task_stages', 'task_progress',
+    'project_members'
   ] LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
     EXECUTE format(

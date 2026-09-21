@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { canWriteEntries } from "@/lib/project-access";
 import { addEntry, entriesOf, threadById } from "@/lib/project-threads";
+import { threadRights } from "@/lib/project-visibility";
 import { MAX_BYTES, resolveKind, safeName, store } from "@/lib/uploads";
 import { readAttachment } from "@/lib/agents/read-file";
 import { id as parseId, str } from "@/lib/validate";
@@ -19,6 +20,8 @@ export async function GET(
 
   const threadId = parseId((await params).id);
   if (!threadId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
+  if (!(await threadRights(user, threadId))?.internal)
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const before = parseId(new URL(request.url).searchParams.get("before"));
   return NextResponse.json(await entriesOf(threadId, 60, before ?? undefined));
@@ -45,12 +48,13 @@ export async function POST(
 ) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
-  if (!canWriteEntries())
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const threadId = parseId((await params).id);
   const thread = threadId ? await threadById(threadId) : undefined;
-  if (!thread) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  const rights = thread ? await threadRights(user, thread.id) : null;
+  if (!thread || !rights) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  if (!canWriteEntries(rights))
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const type = request.headers.get("content-type") ?? "";
 

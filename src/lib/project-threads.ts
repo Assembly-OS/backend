@@ -1,6 +1,7 @@
 import { actingAs } from "./archive";
 import { all, get, insert, now, run, tx } from "./pg";
 import { today } from "./crm";
+import { projectScope, type Viewer } from "./project-visibility";
 import { PHASE_STATUS, type Phase } from "./project-passport";
 import { str } from "./validate";
 import {
@@ -197,16 +198,19 @@ const PROJECT_SELECT = `
     LEFT JOIN klasterlar k ON k.id = l.klaster_id`;
 
 /**
- * Every project, most recently touched first.
+ * Every project this person can see (TZ 4.2), most recently touched first.
  *
  * `NULLS LAST` matters: a project created this morning with nothing written
  * in it yet has no activity at all, and without it Postgres would sort those
  * empty rows above everything anyone is actually working on.
  */
-export async function projectList(): Promise<ProjectSummary[]> {
+export async function projectList(viewer: Viewer): Promise<ProjectSummary[]> {
+  const scope = projectScope(viewer);
   return await all<ProjectSummary>(
-    `${PROJECT_SELECT} ORDER BY last_activity DESC NULLS LAST, l.id DESC`,
+    `${PROJECT_SELECT} WHERE ${scope.sql}
+      ORDER BY last_activity DESC NULLS LAST, l.id DESC`,
     today(),
+    ...scope.params,
   );
 }
 

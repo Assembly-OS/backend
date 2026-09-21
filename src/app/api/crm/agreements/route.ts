@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { projectRights } from "@/lib/project-visibility";
 import { currentUser } from "@/lib/session";
 import { canWrite } from "@/lib/crm-access";
 import {
@@ -28,6 +29,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "DESCRIPTION_REQUIRED" }, { status: 400 });
 
   const deadline = str(body.deadline, 10);
+  // Filed under a project only if its author can see that project (TZ 4.2).
+  const loyihaId = parseId(body.loyiha_id);
+  if (loyihaId !== null && !(await projectRights(user, loyihaId)))
+    return NextResponse.json({ error: "BAD_PROJECT" }, { status: 400 });
   const id = await createAgreement({
     company_id: parseId(body.company_id),
     meeting_id: parseId(body.meeting_id),
@@ -43,7 +48,7 @@ export async function POST(request: Request) {
     created_by: user.id,
     // Set when the commitment was recorded inside a project thread, so it can
     // be found from the project as well as from the company.
-    loyiha_id: parseId(body.loyiha_id),
+    loyiha_id: loyihaId,
     thread_id: parseId(body.thread_id),
   });
   return NextResponse.json({ ok: true, id });

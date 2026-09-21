@@ -1,4 +1,5 @@
 import { crmRole } from "./crm-access";
+import { may } from "./permissions";
 import type { User } from "./types";
 
 /**
@@ -17,19 +18,24 @@ import type { User } from "./types";
  * is where a wrong click costs something; a wrong sentence is edited.
  */
 
-/** Every signed-in member of staff reads the workspace. */
-export function canReadProjects(): boolean {
-  return true;
-}
-
-/** Creating and editing projects and threads: department and project heads up. */
+/**
+ * Opening a project and keeping its threads: whoever TZ 4.2 lets edit a
+ * passport. Which project — the chairman any, a project lead his own — is
+ * `projectRights` in `project-visibility.ts`; this is the question before
+ * there is a project, like the "new project" button.
+ */
 export function canManageProjects(user: User): boolean {
-  return crmRole(user) !== "employee";
+  return may(user, "editPassport");
 }
 
-/** Writing in a thread. Everyone, on purpose — see the note above. */
-export function canWriteEntries(): boolean {
-  return true;
+/**
+ * Writing in a thread. Everyone on the staff who can see the project, on
+ * purpose — see the note above. Since block 4 "who can see the project" is
+ * no longer everyone (`projectRights`), and nobody outside the Assembly
+ * writes in the staff's journal.
+ */
+export function canWriteEntries(rights: { internal: boolean }): boolean {
+  return rights.internal;
 }
 
 /**
@@ -49,6 +55,6 @@ export function canEditEntry(user: User, authorId: number): boolean {
  * worth finding again and alters nothing about it. Anyone who keeps the
  * journal may mark what matters in it.
  */
-export function canPinEntry(): boolean {
-  return canWriteEntries();
+export function canPinEntry(rights: { internal: boolean }): boolean {
+  return canWriteEntries(rights);
 }

@@ -6,10 +6,13 @@ import { id as parseId, oneOf, str } from "./validate";
 import {
   DEPARTMENTS,
   ROLES,
+  isAssociationRole,
+  isExternal,
   receivesTasks,
   type Department,
   type Role,
 } from "./types";
+import { attach } from "./project-visibility";
 import { LOCALES } from "./i18n/config";
 
 /**
@@ -56,8 +59,9 @@ function fail(status: number, error: string): StaffWrite {
  * teach whoever fills the form that the field is arbitrary, which is how it
  * ends up wrong everywhere else.
  *
- * Association heads and project leads do receive work, so they are not
- * exceptions however external they feel.
+ * Project leads do receive work, so they are not exceptions. People outside
+ * the Assembly (TZ 4.1 — an outside project lead, the association roles)
+ * receive none and belong to no department, so for them the field is cleared.
  */
 /**
  * Whether this account may be saved without a manager.
@@ -79,10 +83,47 @@ function readDepartment(
   value: unknown,
   role: Role,
 ): { ok: true; department: Department | null } | { ok: false } {
+  // Someone outside the Assembly belongs to none of its departments; a value
+  // left in the form from an earlier role is dropped, not stored.
+  if (isExternal(role)) return { ok: true, department: null };
   if (DEPARTMENTS.includes(value as Department))
     return { ok: true, department: value as Department };
   if (!receivesTasks(role)) return { ok: true, department: null };
   return { ok: false };
+}
+
+/**
+ * What a role is scoped by (TZ 4.1), checked against rows that exist: a
+ * cluster head's cluster, an association role's association, an outside
+ * project lead's project. Each is required of its role and cleared for every
+ * other, so a person who changes role does not keep the old one's reach.
+ */
+async function readScope(
+  body: Record<string, unknown>,
+  role: Role,
+): Promise<
+  | { ok: true; klasterId: number | null; uyushmaId: number | null; projectId: number | null }
+  | { ok: false; error: string }
+> {
+  const pick = async (value: unknown, table: string): Promise<number | null> => {
+    const wanted = value == null || value === "" ? null : parseId(value);
+    if (wanted === null) return null;
+    return (
+      (await get<{ id: number }>(`SELECT id FROM ${table} WHERE id = ?`, wanted))?.id ?? null
+    );
+  };
+  const klasterId =
+    role === "KLASTER_RAHBARI" ? await pick(body.klasterId, "klasterlar") : null;
+  if (role === "KLASTER_RAHBARI" && klasterId === null)
+    return { ok: false, error: "KLASTER_REQUIRED" };
+  const uyushmaId = isAssociationRole(role)
+    ? await pick(body.uyushmaId, "uyushmalar")
+    : null;
+  if (isAssociationRole(role) && uyushmaId === null)
+    return { ok: false, error: "UYUSHMA_REQUIRED" };
+  const projectId =
+    role === "TASHQI_LOYIHA_RAHBARI" ? await pick(body.projectId, "loyihalar") : null;
+  return { ok: true, klasterId, uyushmaId, projectId };
 }
 
 /** Creates a staff account and returns its id and login. */
@@ -102,6 +143,11 @@ export async function createStaffAccount(
   const picked = readDepartment(body.department, role);
   if (!picked.ok) return fail(400, "DEPARTMENT_REQUIRED");
   const department = picked.department;
+  const scope = await readScope(body, role);
+  if (!scope.ok) return fail(400, scope.error);
+  // An outside lead without a project would sign in to an empty screen.
+  if (role === "TASHQI_LOYIHA_RAHBARI" && scope.projectId === null)
+    return fail(400, "PROJECT_REQUIRED");
   const position = str(body.position, 160);
   const phone = str(body.phone, 40);
   const email = str(body.email, 120);
@@ -126,8 +172,9 @@ export async function createStaffAccount(
   // and one round trip fewer counts now that the database is over a socket.
   const created = await insert(
     `INSERT INTO users (login, password_hash, full_name, role, department, position,
-                        manager_id, phone, email, lang, is_active, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,1,?)`,
+                        manager_id, klaster_id, uyushma_id, phone, email, lang,
+                        is_active, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?)`,
     login,
     hashPassword(password),
     fullName,
@@ -135,11 +182,14 @@ export async function createStaffAccount(
     department,
     position,
     manager,
+    scope.klasterId,
+    scope.uyushmaId,
     phone,
     email,
     lang,
     now(),
   );
+  if (scope.projectId !== null) await attach(scope.projectId, created, manager);
 
   // The new colleague shows up in everyone's staff directory right away.
   publish(created);
@@ -219,6 +269,8 @@ export async function updateStaffAccount(
     const picked = readDepartment(body.department, role);
     if (!picked.ok) return fail(400, "DEPARTMENT_REQUIRED");
     const department = picked.department;
+    const scope = await readScope(body, role);
+    if (!scope.ok) return fail(400, scope.error);
     const managerId = body.managerId == null ? null : parseId(body.managerId);
     // Nobody reports to themselves, and a manager must exist.
     const manager =
@@ -236,17 +288,23 @@ export async function updateStaffAccount(
 
     await run(
       `UPDATE users SET full_name = ?, role = ?, department = ?, position = ?,
-                        manager_id = ?, phone = ?, email = ?
+                        manager_id = ?, klaster_id = ?, uyushma_id = ?,
+                        phone = ?, email = ?
         WHERE id = ?`,
       fullName,
       role,
       department,
       str(body.position, 160),
       manager,
+      scope.klasterId,
+      scope.uyushmaId,
       str(body.phone, 40),
       str(body.email, 120),
       targetId,
     );
+    // Adds the project named in the form; projects attached from the
+    // project's own page stay attached.
+    if (scope.projectId !== null) await attach(scope.projectId, targetId, actorId);
     publish(targetId);
     return OK;
   }

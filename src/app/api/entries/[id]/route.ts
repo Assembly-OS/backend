@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { canEditEntry, canPinEntry } from "@/lib/project-access";
+import { entryRights } from "@/lib/project-visibility";
 import {
   deleteEntry,
   detachFile,
@@ -28,12 +29,15 @@ export async function PATCH(
 
   const entryId = parseId((await params).id);
   const entry = entryId ? await entryById(entryId) : undefined;
-  if (!entry) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  // An entry of a project this person cannot see does not exist for them.
+  const rights = entry ? await entryRights(user, entry.id) : null;
+  if (!entry || !rights?.internal)
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const body = (await request.json()) as Record<string, unknown>;
 
   if (body.action === "pin" || body.action === "unpin") {
-    if (!canPinEntry())
+    if (!canPinEntry(rights))
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     await pinEntry(entry.id, body.action === "pin");
     return NextResponse.json({ ok: true });
@@ -79,7 +83,10 @@ export async function DELETE(
 
   const entryId = parseId((await params).id);
   const entry = entryId ? await entryById(entryId) : undefined;
-  if (!entry) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  // An entry of a project this person cannot see does not exist for them.
+  const rights = entry ? await entryRights(user, entry.id) : null;
+  if (!entry || !rights?.internal)
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   if (!canEditEntry(user, entry.author_id))
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });

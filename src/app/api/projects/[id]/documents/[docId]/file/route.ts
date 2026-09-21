@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { documentOf } from "@/lib/project-documents";
+import { projectRights } from "@/lib/project-visibility";
 import { read } from "@/lib/uploads";
 import { id as parseId } from "@/lib/validate";
 
 /**
- * Downloads one project document, for anyone who reads projects. Always an
+ * Downloads one project document, for anyone who can see the project — a
+ * link to one of a project they cannot see answers 404 (TZ 4.3). Always an
  * attachment; the sandbox policy for this path is set in next.config.ts.
  */
 export async function GET(
@@ -18,8 +20,9 @@ export async function GET(
   const { id, docId } = await params;
   const projectId = parseId(id);
   const documentId = parseId(docId);
+  const visible = projectId ? await projectRights(user, projectId) : null;
   const document =
-    projectId && documentId ? await documentOf(projectId, documentId) : undefined;
+    visible && documentId ? await documentOf(visible.id, documentId) : undefined;
   if (!document) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const bytes = read(document.file_key);

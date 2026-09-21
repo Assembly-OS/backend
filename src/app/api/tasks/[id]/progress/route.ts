@@ -4,6 +4,7 @@ import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { addProgress, canReport, progressOf } from "@/lib/task-progress";
 import type { Task } from "@/lib/types";
+import { canSeeTask } from "@/lib/task-visibility";
 import { id as parseId, str } from "@/lib/validate";
 
 type Params = { params: Promise<{ id: string }> };
@@ -11,7 +12,7 @@ type Params = { params: Promise<{ id: string }> };
 /**
  * The progress journal of one open-ended assignment, TZ block 3.2.
  *
- * Read by anyone signed in, the same reach as the task's own history. Written
+ * Read by whoever may read the task's own history (`canSeeTask`). Written
  * only by the person holding the work, while it is theirs to move.
  */
 export async function GET(_request: Request, { params }: Params) {
@@ -21,8 +22,8 @@ export async function GET(_request: Request, { params }: Params) {
   const taskId = parseId((await params).id);
   if (!taskId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const task = await get<{ id: number }>("SELECT id FROM tasks WHERE id = ?", taskId);
-  if (!task) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  if (!(await canSeeTask(user, taskId)))
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   return NextResponse.json({ entries: await progressOf(taskId) });
 }

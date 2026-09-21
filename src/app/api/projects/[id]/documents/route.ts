@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
-import { projectById } from "@/lib/project-threads";
-import {
-  addDocument,
-  canKeepDocuments,
-  isDocumentKind,
-} from "@/lib/project-documents";
+import { projectRights } from "@/lib/project-visibility";
+import { addDocument, isDocumentKind } from "@/lib/project-documents";
 import { MAX_BYTES, baseMime, safeName, store } from "@/lib/uploads";
 import { id as parseId, str } from "@/lib/validate";
 
@@ -21,9 +17,9 @@ export async function POST(
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
   const projectId = parseId((await params).id);
-  const project = projectId ? await projectById(projectId) : undefined;
+  const project = projectId ? await projectRights(user, projectId) : null;
   if (!project) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
-  if (!canKeepDocuments(user, project))
+  if (!project.keepDocuments)
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   let form: FormData;

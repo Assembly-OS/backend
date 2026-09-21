@@ -4,6 +4,7 @@ import { companyById } from "@/lib/crm";
 import { LEGAL_STATUSES, meetingCode, type LegalStatus } from "@/lib/meetings";
 import { assignableUsers } from "@/lib/queries";
 import { receivesTasks, type User } from "@/lib/types";
+import { visibleProjectIds } from "@/lib/project-visibility";
 import { id as parseId, str } from "@/lib/validate";
 
 /** A meeting body, checked and normalised, ready to write. */
@@ -33,7 +34,7 @@ function idList(value: unknown, max: number): number[] {
 
 /** Which of `ids` exist in `table` — anything else was invented by the client. */
 async function existing(
-  table: "loyihalar" | "users",
+  table: "users",
   ids: number[],
   extra = "",
 ): Promise<number[]> {
@@ -119,7 +120,8 @@ export async function readMeetingInput(
       uyushma_id: uyushmaId,
       // Links to rows that do not exist are dropped rather than refused: a
       // project deleted while the form was open should not cost the meeting.
-      project_ids: await existing("loyihalar", idList(body.project_ids, 20)),
+      // So is a project the author cannot see (TZ 4.2).
+      project_ids: await visibleProjectIds(user, idList(body.project_ids, 20)),
       staff_ids: await existing(
         "users",
         idList(body.staff_ids, 40),

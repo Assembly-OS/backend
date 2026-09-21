@@ -8,7 +8,8 @@ import {
   CLOSED_STATUSES,
 } from "./metrics";
 import { seesEverything } from "./oversight";
-import { isManager } from "./types";
+import { projectScope, type Viewer } from "./project-visibility";
+import { EXTERNAL_ROLES, isExternal, isManager } from "./types";
 import type {
   MessageKind,
   QueuedTaskRow,
@@ -273,6 +274,9 @@ export async function subordinates(userId: number): Promise<User[]> {
   );
 }
 
+/** SQL list of the roles that take no assignments: the chairman, outsiders. */
+const TAKES_NO_WORK = ["RAIS", ...EXTERNAL_ROLES].map((role) => `'${role}'`).join(",");
+
 /** Who this user is allowed to hand an assignment to. */
 export async function assignableUsers(user: User): Promise<User[]> {
   // The chairman, and whoever acts as his hands, may hand work to anyone. For
@@ -285,10 +289,39 @@ export async function assignableUsers(user: User): Promise<User[]> {
   // to him was accepted by the API and then seen by no one. It was also how he
   // came to be offered under "My team" in the audit. The API validates the
   // assignee against this same list, so excluding him here closes both.
+  // Nor may anyone outside the Assembly be handed work, nor hand it out
+  // (TZ 4.3): their part is a project's status or an association's meetings.
+  if (isExternal(user.role)) return [];
   if (seesEverything(user)) {
     return await all<User>(
-      `SELECT * FROM users WHERE is_active = 1 AND role <> 'RAIS'
+      `SELECT * FROM users WHERE is_active = 1 AND role NOT IN (${TAKES_NO_WORK})
        ORDER BY role, full_name`,
+    );
+  }
+  if (user.role === "LOYIHA_RAHBARI") {
+    // TZ 4.2: a project lead assigns "to the team" — himself, whoever reports
+    // to him, and the staff attached to the projects he is attached to.
+    return await all<User>(
+      `SELECT * FROM users u
+        WHERE u.is_active = 1 AND u.role NOT IN (${TAKES_NO_WORK})
+          AND (u.id = ? OR u.manager_id = ?
+               OR EXISTS (
+                 SELECT 1 FROM loyihalar l
+                  WHERE (l.owner_id = ? OR l.deputy_id = ?
+                         OR EXISTS (SELECT 1 FROM project_members me
+                                     WHERE me.project_id = l.id AND me.user_id = ?))
+                    AND (l.owner_id = u.id OR l.deputy_id = u.id
+                         OR EXISTS (SELECT 1 FROM project_members pm
+                                     WHERE pm.project_id = l.id AND pm.user_id = u.id))))
+        ORDER BY CASE WHEN u.id = ? THEN 0 WHEN u.manager_id = ? THEN 1 ELSE 2 END,
+                 u.role, u.full_name`,
+      user.id,
+      user.id,
+      user.id,
+      user.id,
+      user.id,
+      user.id,
+      user.id,
     );
   }
   if (user.role === "ISHCHI") {
@@ -299,16 +332,16 @@ export async function assignableUsers(user: User): Promise<User[]> {
       user.id,
     );
   }
-  // Heads: own staff, peer departments, association and project leads — and
+  // Heads: own staff, peer departments and cluster and project leads — and
   // themselves. Somebody whose work is entirely their own had no way to record
   // it: the chairman's assistant received nothing from anyone, so the execute
   // page stayed empty and there was never a result to submit.
   return await all<User>(
     `SELECT * FROM users
-     WHERE is_active = 1 AND role <> 'RAIS'
+     WHERE is_active = 1 AND role NOT IN (${TAKES_NO_WORK})
        AND (id = ?
             OR manager_id = ?
-            OR role IN ('BOLIM_RAHBARI','AI_LAB','UYUSHMA_RAISI','LOYIHA_RAHBARI'))
+            OR role IN ('KLASTER_RAHBARI','BOLIM_RAHBARI','AI_LAB','LOYIHA_RAHBARI'))
      ORDER BY CASE WHEN id = ? THEN 0 WHEN manager_id = ? THEN 1 ELSE 2 END,
               role, full_name`,
     user.id,
@@ -667,14 +700,18 @@ export interface ProjectRow {
   uyushma_name: string | null;
 }
 
-export async function projects(): Promise<ProjectRow[]> {
+/** The projects this person can see (TZ 4.2), furthest along first. */
+export async function projects(viewer: Viewer): Promise<ProjectRow[]> {
+  const scope = projectScope(viewer);
   return await all<ProjectRow>(
     `SELECT l.id, l.code, l.name, l.status, l.progress, l.budget, l.deadline,
             o.full_name AS owner_name, o.login AS owner_login, u.name AS uyushma_name
      FROM loyihalar l
      LEFT JOIN users o ON o.id = l.owner_id
      LEFT JOIN uyushmalar u ON u.id = l.uyushma_id
+     WHERE ${scope.sql}
      ORDER BY l.progress DESC`,
+    ...scope.params,
   );
 }
 

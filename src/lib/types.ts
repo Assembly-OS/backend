@@ -1,10 +1,13 @@
 export type Role =
   | "RAIS"
-  | "UYUSHMA_RAISI"
-  | "LOYIHA_RAHBARI"
+  | "KLASTER_RAHBARI"
   | "BOLIM_RAHBARI"
+  | "LOYIHA_RAHBARI"
   | "AI_LAB"
-  | "ISHCHI";
+  | "ISHCHI"
+  | "TASHQI_LOYIHA_RAHBARI"
+  | "UYUSHMA_RAISI"
+  | "UYUSHMA_VAKILI";
 
 export type Department = "GR" | "FR" | "BR" | "PR" | "AI_LAB";
 
@@ -21,14 +24,41 @@ export type Priority = "PAST" | "ORTA" | "YUQORI" | "KRITIK";
 
 export type Locale = "uz" | "uzc" | "ru" | "en";
 
+// Staff first, then the people outside the Assembly (TZ 4.1): the order the
+// role picker lists them in.
 export const ROLES: Role[] = [
   "RAIS",
-  "UYUSHMA_RAISI",
-  "LOYIHA_RAHBARI",
+  "KLASTER_RAHBARI",
   "BOLIM_RAHBARI",
+  "LOYIHA_RAHBARI",
   "AI_LAB",
   "ISHCHI",
+  "TASHQI_LOYIHA_RAHBARI",
+  "UYUSHMA_RAISI",
+  "UYUSHMA_VAKILI",
 ];
+
+/**
+ * People who work with the Assembly without working in it (TZ 4.1, 4.3): an
+ * outside project lead, an association's chairman and its representative —
+ * the one who carries the association's business to the Assembly and back.
+ * They see their own project or their own association and nothing else, take
+ * no assignments and hand out none.
+ */
+export const EXTERNAL_ROLES: Role[] = [
+  "TASHQI_LOYIHA_RAHBARI",
+  "UYUSHMA_RAISI",
+  "UYUSHMA_VAKILI",
+];
+
+export function isExternal(role: Role): boolean {
+  return EXTERNAL_ROLES.includes(role);
+}
+
+/** The two association roles, which are scoped by `users.uyushma_id`. */
+export function isAssociationRole(role: Role): boolean {
+  return role === "UYUSHMA_RAISI" || role === "UYUSHMA_VAKILI";
+}
 
 export const DEPARTMENTS: Department[] = ["GR", "FR", "BR", "PR", "AI_LAB"];
 
@@ -54,6 +84,10 @@ export interface User {
   uyushma_id: number | null;
   loyiha_id: number | null;
   manager_id: number | null;
+  /** A cluster head's cluster (TZ 4.1); null for everyone else. */
+  klaster_id: number | null;
+  /** 1 when the chairman has granted the global AI view (TZ 4.2). */
+  global_ai: number;
   phone: string | null;
   email: string | null;
   lang: Locale;
@@ -220,10 +254,14 @@ export interface Message {
   read_at: string | null;
 }
 
-/** Roles that command a vertical: they may hand out tasks and review results. */
+/**
+ * Roles that command a vertical: they may hand out tasks and review results.
+ * The association chairman left this list with block 4 — he is outside the
+ * Assembly and hands its staff no work (the owner's call, 2026-09-21).
+ */
 export const MANAGER_ROLES: Role[] = [
   "RAIS",
-  "UYUSHMA_RAISI",
+  "KLASTER_RAHBARI",
   "LOYIHA_RAHBARI",
   "BOLIM_RAHBARI",
   "AI_LAB",
@@ -258,7 +296,9 @@ export function isManager(role: Role): boolean {
  * work to the chairman, so the inbox/execute pages do not apply to that role.
  */
 export function receivesTasks(role: Role): boolean {
-  return role !== "RAIS";
+  // Nor to anyone outside the Assembly: an external user's part is the
+  // project's status and the association's meetings, not the task queue.
+  return role !== "RAIS" && !isExternal(role);
 }
 
 /**

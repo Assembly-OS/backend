@@ -1,3 +1,4 @@
+import { seesEverything } from "./permissions";
 import type { User } from "./types";
 
 /**
@@ -23,21 +24,9 @@ import type { User } from "./types";
  * see `canManageStaff` — and withdrawing an assignment somebody else sent,
  * which remains the chairman's.
  */
-const ASSISTANT_LOGINS = (
-  process.env.CRM_ADMIN_LOGINS ?? "muslimbek.komiljonov"
-)
-  .split(",")
-  .map((login) => login.trim().toLowerCase())
-  .filter(Boolean);
-
-export function isAssistant(user: User): boolean {
-  return ASSISTANT_LOGINS.includes(user.login.toLowerCase());
-}
-
-/** The chairman's own view of the Assembly, and his assistant's. */
-export function seesEverything(user: User): boolean {
-  return user.role === "RAIS" || isAssistant(user);
-}
+// The list itself lives in `permissions.ts`, beside the table it selects a
+// column of, so the table's tests can load it; everyone else imports it here.
+export { isAssistant, seesEverything } from "./permissions";
 
 /**
  * Whose finished work a manager may open from the report, task by task.

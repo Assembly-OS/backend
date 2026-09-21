@@ -1,4 +1,5 @@
 import { all, get, now, run, type Tx } from "./pg";
+import { projectOptions } from "./project-visibility";
 import { assignableUsers } from "./queries";
 import type { User } from "./types";
 import {
@@ -350,9 +351,8 @@ export async function meetingFormOptions(user: User): Promise<{
       all<{ id: number; full_name: string; position: string | null }>(
         "SELECT id, full_name, position FROM users WHERE is_active = 1 ORDER BY full_name",
       ),
-      all<{ id: number; code: string; name: string }>(
-        "SELECT id, code, name FROM loyihalar ORDER BY code",
-      ),
+      // Only projects the author can see may be linked (TZ 4.2).
+      projectOptions(user),
       all<{ id: number; name: string }>(
         "SELECT id, name FROM uyushmalar ORDER BY name",
       ),

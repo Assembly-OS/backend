@@ -5,6 +5,7 @@ import { publish } from "@/lib/events";
 import { notifyBot } from "@/lib/notify-bot";
 import { assignableUsers } from "@/lib/queries";
 import { priorityRefusal, priorityRoom } from "@/lib/priority-limits";
+import { attach, projectRights } from "@/lib/project-visibility";
 import { id, oneOf, str } from "@/lib/validate";
 import {
   PRIORITIES,
@@ -104,6 +105,10 @@ export async function POST(request: Request) {
   const description = str(body.description, 4000);
   const typedDeadline = str(body.deadline, 20);
   const loyihaId = body.loyihaId == null ? null : id(body.loyihaId);
+  // Work may only be filed under a project its author can see (TZ 4.2) —
+  // otherwise an id would attach people to a project nobody showed them.
+  if (loyihaId !== null && !(await projectRights(user, loyihaId)))
+    return NextResponse.json({ error: "BAD_PROJECT" }, { status: 400 });
 
   // TZ block 3.1. A caller that does not send a kind — an older client, an
   // integration — gets the one its deadline implies, so nothing that worked
@@ -195,6 +200,11 @@ export async function POST(request: Request) {
 
     return newId;
   });
+
+  // Work on a project attaches whoever it passes through, so they can open the
+  // project it belongs to (TZ 4.2).
+  if (loyihaId !== null)
+    for (const stage of chain) await attach(loyihaId, stage.toUserId, user.id);
 
   // The first assignee's inbox and counters, and everybody else's "coming to
   // you" list, refresh at once.
