@@ -6,6 +6,7 @@ import { addProgress, canReport, progressOf } from "@/lib/task-progress";
 import type { Task } from "@/lib/types";
 import { canSeeTask } from "@/lib/task-visibility";
 import { id as parseId, str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -69,5 +70,6 @@ export async function POST(request: Request, { params }: Params) {
 
   // The author sees the entry, and a lifted "Jim", without reloading.
   publish(task.from_user_id, task.to_user_id);
+  void remember("task", taskId);
   return NextResponse.json({ ok: true, id }, { status: 201 });
 }

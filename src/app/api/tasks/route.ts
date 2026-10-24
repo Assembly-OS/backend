@@ -14,6 +14,7 @@ import {
   TASK_SCOPES,
   type User,
 } from "@/lib/types";
+import { remember } from "@/lib/knowledge/sources";
 
 /** Eight people is already an unusual chain; past that it is a process, not a
  *  task, and the form would be unreadable on a 360px screen. */
@@ -200,6 +201,9 @@ export async function POST(request: Request) {
 
     return newId;
   });
+
+  // Into the organisational memory, read in the background.
+  void remember("task", taskId);
 
   // Work on a project attaches whoever it passes through, so they can open the
   // project it belongs to (TZ 4.2).

@@ -4,6 +4,7 @@ import { notify } from "@/lib/notifications";
 import { priorityRefusal, priorityRoom } from "@/lib/priority-limits";
 import { assignableUsers } from "@/lib/queries";
 import type { Priority, User } from "@/lib/types";
+import { remember } from "./knowledge/sources";
 
 export interface AssignmentDraft {
   toUserId: number;
@@ -122,5 +123,7 @@ export async function createAssignment(
     push: true,
   });
 
+  // Into the organisational memory, read in the background.
+  void remember("task", taskId);
   return { id: taskId, code };
 }

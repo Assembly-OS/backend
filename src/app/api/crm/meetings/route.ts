@@ -9,6 +9,7 @@ import { createAgreement, touchCompany } from "@/lib/crm";
 import { runMeetingIntake } from "@/lib/agents/intake-runner";
 import { assignableUsers } from "@/lib/queries";
 import { id as parseId, oneOf, str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * A meeting typed in by hand, optionally with its transcript, optionally
@@ -109,6 +110,9 @@ export async function POST(request: Request) {
   }
 
   const task = await raiseNextStep(meetingId, input, user);
+
+  // Into the organisational memory — fields, conclusions and transcript.
+  void remember("meeting", meetingId);
 
   return NextResponse.json({
     ok: true,

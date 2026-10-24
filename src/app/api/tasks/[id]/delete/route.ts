@@ -4,6 +4,7 @@ import { get, tx } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { id as parseId } from "@/lib/validate";
+import { forget } from "@/lib/knowledge/sources";
 
 /**
  * Withdrawing an assignment sent by mistake.
@@ -68,5 +69,8 @@ export async function POST(
   });
 
   publish(task.from_user_id, task.to_user_id);
+  // Gone from the memory at once: a withdrawn assignment must not keep
+  // answering as if it existed.
+  await forget("task", taskId);
   return NextResponse.json({ ok: true });
 }

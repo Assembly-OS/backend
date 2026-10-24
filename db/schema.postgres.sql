@@ -1322,3 +1322,235 @@ BEGIN
   END LOOP;
 END;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- The organisational memory: what the AI assistant answers from.
+--
+-- Every record the platform already keeps — a task, a meeting, a journal
+-- entry, a chat attachment, a voice note, a project document, a library file
+-- — is read once into this contour and kept searchable here. The original
+-- rows stay where they are and remain the truth; what lives here is derived:
+-- the extracted text, cut into passages, with an optional embedding, and the
+-- facts the model read out of it, each pointing back at the row it came from.
+--
+-- Nothing here grants access. Who may read a passage is decided at retrieval
+-- time against the live tables (lib/knowledge/access.ts), so a change of
+-- project membership or a deleted message takes effect on the next question.
+-- ---------------------------------------------------------------------------
+
+-- The document library: files staff upload for the assistant to answer from,
+-- outside any project. `visibility` says who may read one: every member of
+-- staff (ALL), the members of one project (PROJECT), one department
+-- (DEPARTMENT), or the uploader alone (PRIVATE).
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title       TEXT NOT NULL,
+  file_key    TEXT NOT NULL,
+  file_name   TEXT NOT NULL,
+  file_size   INTEGER NOT NULL,
+  file_mime   TEXT NOT NULL,
+  -- What the file was: Word, Excel, PowerPoint, PDF, Rasm, Matn.
+  format      TEXT NOT NULL,
+  visibility  TEXT NOT NULL DEFAULT 'ALL',
+  project_id  INTEGER REFERENCES loyihalar(id) ON DELETE SET NULL,
+  department  TEXT,
+  -- Goes up every time the file is replaced; the source row follows it.
+  version     INTEGER NOT NULL DEFAULT 1,
+  uploaded_by INTEGER NOT NULL REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_project ON knowledge_documents(project_id);
+
+-- One row per original record read into the memory. (kind, ref_id) is the
+-- identity: ingesting the same record twice updates this row rather than
+-- adding a second one, and `fingerprint` — a hash of the content as read —
+-- is what tells an unchanged record from a changed one, so a re-run costs
+-- nothing when nothing moved.
+--
+-- `occurred_at` is when the thing happened (valid time); `created_at` and
+-- `indexed_at` are when the platform learned of it and when it was last read
+-- (ingestion time). The assistant is handed both.
+CREATE TABLE IF NOT EXISTS knowledge_sources (
+  id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  -- task | meeting | thread_entry | message | project_document | library
+  -- | kelishuv | agreement | project
+  kind          TEXT NOT NULL,
+  ref_id        INTEGER NOT NULL,
+  version       INTEGER NOT NULL DEFAULT 1,
+  fingerprint   TEXT,
+  title         TEXT NOT NULL DEFAULT '',
+  author_id     INTEGER,
+  occurred_at   TEXT,
+  lang          TEXT,
+  -- Where the record sits, copied for filtering; access itself is re-checked
+  -- against the live tables on every retrieval.
+  project_id    INTEGER,
+  company_id    INTEGER,
+  meeting_id    INTEGER,
+  task_id       INTEGER,
+  thread_id     INTEGER,
+  group_id      INTEGER,
+  from_user_id  INTEGER,
+  to_user_id    INTEGER,
+  uyushma_id    INTEGER,
+  -- How much to trust it when sources disagree: a confirmed task record
+  -- outranks a transcript, which outranks a chat line. 0..1.
+  reliability   REAL NOT NULL DEFAULT 0.7,
+  -- PENDING | PROCESSING | READY | PARTIAL | FAILED | DELETED | SKIPPED
+  status        TEXT NOT NULL DEFAULT 'PENDING',
+  -- Why a read failed or was partial, in a code the UI translates.
+  reason        TEXT,
+  text_chars    INTEGER NOT NULL DEFAULT 0,
+  chunk_count   INTEGER NOT NULL DEFAULT 0,
+  -- Whether the facts pass has run for this version.
+  facts_at      TEXT,
+  embedded_at   TEXT,
+  indexed_at    TEXT,
+  created_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  UNIQUE (kind, ref_id)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_status  ON knowledge_sources(status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_project ON knowledge_sources(project_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_when    ON knowledge_sources(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_task    ON knowledge_sources(task_id);
+
+-- A source cut into passages of about a page, in reading order. The search
+-- column is kept by Postgres itself, with the `simple` configuration: the
+-- corpus is Uzbek, Russian and English at once and no one stemmer fits all
+-- three, so matching is by prefix (lib/knowledge/text.ts, `searchTerms`).
+--
+-- `embedding` is a plain float array rather than a pgvector column so the
+-- schema needs no extension the production image does not ship; similarity
+-- is `knowledge_cosine` below. Fine at the Assembly's scale (thousands of
+-- passages); a vector index is the upgrade path past that.
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id   INTEGER NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  position    INTEGER NOT NULL,
+  -- A heading or section label the passage sits under, when the text had one.
+  section     TEXT,
+  body        TEXT NOT NULL,
+  search      tsvector GENERATED ALWAYS AS (to_tsvector('simple', body)) STORED,
+  embedding   REAL[],
+  embedding_model TEXT,
+  UNIQUE (source_id, version, position)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_search ON knowledge_chunks USING GIN (search);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_source ON knowledge_chunks(source_id, position);
+
+-- What the model read out of a source: a decision, a commitment, an action
+-- item, a deadline, a plain fact. Each carries its provenance — the source
+-- and the passage it was read from, whether it was stated outright or
+-- inferred, and the model's confidence — so an answer can say which.
+-- A fact that names work already on the task list is linked to that task
+-- rather than raised again (`task_id`).
+CREATE TABLE IF NOT EXISTS knowledge_facts (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id   INTEGER NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  chunk_id    INTEGER REFERENCES knowledge_chunks(id) ON DELETE SET NULL,
+  -- decision | commitment | action_item | deadline | fact | risk
+  kind        TEXT NOT NULL,
+  subject     TEXT,
+  statement   TEXT NOT NULL,
+  -- Who is responsible, as written; resolved to a user when the name matched.
+  who         TEXT,
+  who_user_id INTEGER,
+  due_on      TEXT,
+  -- direct: written in the source. inferred: the model's reading of it.
+  stated      TEXT NOT NULL DEFAULT 'direct',
+  confidence  REAL NOT NULL DEFAULT 0.5,
+  -- The exact words the fact rests on, for the reader to check.
+  quote       TEXT,
+  task_id     INTEGER,
+  -- proposed | confirmed | rejected — a person's verdict, when given.
+  status      TEXT NOT NULL DEFAULT 'proposed',
+  search      tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(subject, '') || ' ' || statement || ' ' || coalesce(who, ''))) STORED,
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_facts_source ON knowledge_facts(source_id, version);
+CREATE INDEX IF NOT EXISTS idx_knowledge_facts_search ON knowledge_facts USING GIN (search);
+CREATE INDEX IF NOT EXISTS idx_knowledge_facts_task   ON knowledge_facts(task_id);
+
+-- Connections the reading found between records: a meeting that mentions a
+-- project, a message about a task, a document attached to a company. Each is
+-- evidence-backed (`source_id`) and never the only copy of anything.
+CREATE TABLE IF NOT EXISTS knowledge_links (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id   INTEGER NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+  -- project | person | task | company | meeting
+  to_kind     TEXT NOT NULL,
+  to_id       INTEGER NOT NULL,
+  -- mentions | about | assigned | produced | attached
+  relation    TEXT NOT NULL DEFAULT 'mentions',
+  confidence  REAL NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  UNIQUE (source_id, to_kind, to_id, relation)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_links_to ON knowledge_links(to_kind, to_id);
+
+-- The work queue. Reading a file, transcribing a recording, asking for
+-- embeddings and extracting facts all take seconds to minutes, so none of it
+-- runs inside the request that created the record: a job is queued and a
+-- worker picks it up (lib/knowledge/jobs.ts). Claiming uses SKIP LOCKED, so
+-- the web app and the bot can both run workers without doubling the work.
+-- A failed job is retried with a growing delay until `max_attempts`.
+CREATE TABLE IF NOT EXISTS knowledge_jobs (
+  id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id    INTEGER NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+  -- index (read + chunk) | embed | facts | reconcile
+  kind         TEXT NOT NULL DEFAULT 'index',
+  -- QUEUED | RUNNING | DONE | FAILED
+  status       TEXT NOT NULL DEFAULT 'QUEUED',
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 4,
+  run_after    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  locked_at    TEXT,
+  locked_by    TEXT,
+  error        TEXT,
+  duration_ms  INTEGER,
+  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  finished_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_due ON knowledge_jobs(status, run_after, id);
+-- One open job per (source, kind): a record edited three times in a minute
+-- is read once, not three times.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_jobs_open
+  ON knowledge_jobs(source_id, kind) WHERE status IN ('QUEUED', 'RUNNING');
+
+-- The passages an answer was built from, kept with the answer so "show me
+-- the evidence" works after a reload and after the records changed.
+ALTER TABLE assistant_messages ADD COLUMN IF NOT EXISTS evidence JSONB;
+
+-- Cosine similarity of two embeddings. Plain SQL over unnest: no extension,
+-- and a few milliseconds per thousand passages, which is the scale here.
+CREATE OR REPLACE FUNCTION knowledge_cosine(a REAL[], b REAL[]) RETURNS REAL AS $$
+  SELECT CASE
+    WHEN a IS NULL OR b IS NULL OR cardinality(a) = 0 OR cardinality(a) <> cardinality(b) THEN NULL
+    ELSE (
+      SELECT (SUM(x * y) / NULLIF(SQRT(SUM(x * x)) * SQRT(SUM(y * y)), 0))::real
+        FROM unnest(a, b) AS t(x, y)
+    )
+  END
+$$ LANGUAGE sql IMMUTABLE;
+
+-- The library's files are the Assembly's record as much as a project's
+-- documents are: a removed one goes to the archive like the rest.
+DO $$
+BEGIN
+  EXECUTE 'DROP TRIGGER IF EXISTS archive_on_delete ON knowledge_documents';
+  EXECUTE 'CREATE TRIGGER archive_on_delete BEFORE DELETE ON knowledge_documents '
+          'FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()';
+  EXECUTE 'DROP TRIGGER IF EXISTS audit_on_write ON knowledge_documents';
+  EXECUTE 'CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON knowledge_documents '
+          'FOR EACH ROW EXECUTE FUNCTION audit_row()';
+END;
+$$;
+
+-- A voice note's words, once the memory has transcribed it: kept on the
+-- message so the chat can show them and nothing transcribes the same audio
+-- twice.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript TEXT;

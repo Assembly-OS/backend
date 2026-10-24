@@ -5,6 +5,7 @@ import { createProject, projectList } from "@/lib/project-threads";
 import { PROJECT_PRIORITIES, PROJECT_STATUSES } from "@/lib/projects";
 import { PHASES, type Phase } from "@/lib/project-passport";
 import { id as parseId, oneOf, str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * A malformed date is dropped rather than stored: a deadline nothing can
@@ -47,5 +48,6 @@ export async function POST(request: Request) {
     ownerId: body.ownerId == null ? user.id : parseId(body.ownerId),
   });
 
+  void remember("project", id);
   return NextResponse.json({ ok: true, id });
 }

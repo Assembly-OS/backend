@@ -4,6 +4,7 @@ import { projectRights } from "@/lib/project-visibility";
 import { updatePassport } from "@/lib/project-threads";
 import { readPassport } from "@/lib/projects";
 import { id as parseId } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Saves a project's passport, block 1.3 of the rebuild TZ.
@@ -32,5 +33,6 @@ export async function PATCH(
   if (!read.ok) return NextResponse.json({ error: read.error }, { status: 400 });
 
   await updatePassport(project.id, read.input);
+  void remember("project", project.id);
   return NextResponse.json({ ok: true });
 }

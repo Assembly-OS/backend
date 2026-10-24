@@ -5,6 +5,7 @@ import { readStages, saveStages } from "@/lib/project-stages";
 import { today } from "@/lib/crm";
 import { projectRights } from "@/lib/project-visibility";
 import { id as parseId } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Saves a project's work schedule, block 1.4 of the rebuild TZ.
@@ -40,5 +41,6 @@ export async function PUT(
     return NextResponse.json({ error: read.error, row: read.row }, { status: 400 });
 
   await saveStages(project.id, read.rows, user, manager);
+  void remember("project", project.id);
   return NextResponse.json({ ok: true });
 }

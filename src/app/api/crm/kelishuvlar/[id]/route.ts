@@ -5,6 +5,7 @@ import { setParties } from "@/lib/kelishuvlar";
 import { get, now, tx } from "@/lib/pg";
 import { id as parseId } from "@/lib/validate";
 import { readKelishuvInput, syncObligations } from "../input";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Correcting an agreement, its parties and its obligations.
@@ -68,5 +69,6 @@ export async function PATCH(
   });
 
   await syncObligations(id, input, user);
+  void remember("kelishuv", id);
   return NextResponse.json({ ok: true, id });
 }

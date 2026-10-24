@@ -3,6 +3,7 @@ import { get, run } from "@/lib/pg";
 import { publish } from "@/lib/events";
 import { hasAdminSession } from "@/lib/admin-auth";
 import { id as parseId } from "@/lib/validate";
+import { forget } from "@/lib/knowledge/sources";
 
 /**
  * Removes an assignment from the panel, in any state.
@@ -36,6 +37,7 @@ export async function DELETE(
   if (!task) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   await run("DELETE FROM tasks WHERE id = ?", taskId);
+  await forget("task", taskId);
 
   // Both sides lose a row from their lists and their counters, so both need
   // telling — the assignee most of all, since it was on their desk.
