@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { canRead, canWrite } from "@/lib/crm-access";
 import { COMPANY_STATUSES, companies, createCompany } from "@/lib/crm";
+import { VERIFICATIONS } from "@/lib/crm-stages";
 import { id as parseId, oneOf, str } from "@/lib/validate";
 
 /** The company directory: list with filters, and create. */
@@ -52,6 +53,11 @@ export async function POST(request: Request) {
     // Unowned relationships are the ones that go quiet, so the creator owns it
     // unless they name somebody else.
     owner_user_id: parseId(body.owner_user_id) ?? user.id,
+    // TZ 6.1 / 6.3: the association it belongs to, and whether it was checked.
+    uyushma_id: parseId(body.uyushma_id),
+    verification: oneOf(body.verification, VERIFICATIONS, "NOT_CHECKED"),
+    next_step: str(body.next_step, 300),
+    next_step_on: str(body.next_step_on, 10),
   });
 
   return NextResponse.json({ ok: true, id });

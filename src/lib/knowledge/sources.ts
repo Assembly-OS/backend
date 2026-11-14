@@ -292,6 +292,7 @@ const BACKFILL: { kind: SourceKind; sql: string }[] = [
   { kind: "kelishuv", sql: "SELECT id FROM kelishuvlar" },
   { kind: "agreement", sql: "SELECT id FROM agreements" },
   { kind: "project", sql: "SELECT id FROM loyihalar" },
+  { kind: "uyushma", sql: "SELECT id FROM uyushmalar" },
 ];
 
 /**

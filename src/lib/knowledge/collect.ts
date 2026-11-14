@@ -920,6 +920,60 @@ async function collectProject(id: number): Promise<Collected | null> {
 }
 
 /* ------------------------------------------------------------------ */
+/* Associations                                                        */
+/* ------------------------------------------------------------------ */
+
+async function collectAssociation(id: number): Promise<Collected | null> {
+  const u = await get<Record<string, unknown>>(
+    `SELECT u.*, r.full_name AS responsible_name FROM uyushmalar u
+       LEFT JOIN users r ON r.id = u.responsible_user_id WHERE u.id = ?`,
+    id,
+  );
+  if (!u) return null;
+  const projects = await all<{ id: number; code: string; name: string }>(
+    `SELECT l.id, l.code, l.name FROM uyushma_projects up JOIN loyihalar l ON l.id = up.project_id
+      WHERE up.uyushma_id = ?
+      UNION SELECT l.id, l.code, l.name FROM loyihalar l WHERE l.uyushma_id = ? ORDER BY code`,
+    id,
+    id,
+  );
+  const companies = await all<{ id: number; name: string; stage: string }>(
+    "SELECT id, name, stage FROM partners WHERE uyushma_id = ? ORDER BY name LIMIT 200",
+    id,
+  );
+  let text =
+    `Association: ${u.name}\n` +
+    line("Name (ru)", u.name_ru) +
+    line("Name (en)", u.name_en) +
+    line("Sector", u.sector) +
+    line("Contour", u.kontur) +
+    line("Region", u.region) +
+    line("Status", u.status) +
+    line("Assembly responsible", u.responsible_name) +
+    line("Head", [u.head_name, u.head_position, u.head_contact].filter(Boolean).join(", ") || null) +
+    line("Member companies", u.members_count) +
+    line("Projects", projects.map((project) => `${project.code} ${project.name}`).join("; ") || null);
+  if (companies.length) {
+    text += "\nMember companies in the base:\n";
+    for (const company of companies) text += `- ${company.name} (${company.stage})\n`;
+  }
+  return {
+    title: String(u.name),
+    text,
+    occurredAt: day((u.updated_at as string | null) ?? (u.created_at as string)),
+    authorId: (u.responsible_user_id as number | null) ?? null,
+    lang: null,
+    reliability: RELIABILITY.uyushma,
+    scope: { uyushmaId: id },
+    links: [
+      ...projects.map((project) => ({ toKind: "project" as const, toId: project.id, relation: "about" })),
+      ...companies.map((company) => ({ toKind: "company" as const, toId: company.id, relation: "about" })),
+      ...(u.responsible_user_id ? [{ toKind: "person" as const, toId: Number(u.responsible_user_id), relation: "assigned" }] : []),
+    ],
+  };
+}
+
+/* ------------------------------------------------------------------ */
 
 export async function collect(kind: SourceKind, refId: number): Promise<Collected | null> {
   switch (kind) {
@@ -941,6 +995,8 @@ export async function collect(kind: SourceKind, refId: number): Promise<Collecte
       return collectAgreement(refId);
     case "project":
       return collectProject(refId);
+    case "uyushma":
+      return collectAssociation(refId);
     default:
       return null;
   }

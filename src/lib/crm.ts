@@ -2,6 +2,16 @@ import { actingAs } from "./archive";
 import { all, get, insert, now, run, tx } from "./pg";
 import { notify } from "./notifications";
 import { remember } from "./knowledge/sources";
+import { projectScope, type Viewer } from "./project-visibility";
+import {
+  daysIn,
+  isAdvance,
+  isStuck,
+  stageFor,
+  statusFromStage,
+  type Stage,
+  type Verification,
+} from "./crm-stages";
 
 /**
  * The CRM half of the platform: companies, the people inside them, the
@@ -108,19 +118,34 @@ export interface Company {
   /** Written by the AI intake before the CRM existed; still the oldest signal. */
   first_seen: string | null;
   last_seen: string | null;
+  /** TZ 6.2: where the company stands on the nine-stage path, since when. */
+  stage: Stage;
+  stage_since: string | null;
+  deal_value: number | null;
+  deal_currency: string | null;
+  next_step: string | null;
+  next_step_on: string | null;
+  /** TZ 6.3: whether the company has been checked. */
+  verification: Verification;
+  uyushma_id: number | null;
 }
 
 export interface CompanyRow extends Company {
   owner_name: string | null;
+  uyushma_name: string | null;
   meetings: number;
   agreements: number;
   open_agreements: number;
   contacts: number;
+  /** Projects with a thread about this company. */
+  projects: number;
 }
 
 /** The list view: every company with the counts that make the row useful. */
 export async function companies(filter?: {
   status?: string;
+  stage?: string;
+  uyushmaId?: number | null;
   query?: string;
 }): Promise<CompanyRow[]> {
   const where: string[] = [];
@@ -129,6 +154,14 @@ export async function companies(filter?: {
   if (filter?.status && filter.status !== "ALL") {
     where.push("p.status = ?");
     params.push(filter.status);
+  }
+  if (filter?.stage) {
+    where.push("p.stage = ?");
+    params.push(filter.stage);
+  }
+  if (filter?.uyushmaId) {
+    where.push("p.uyushma_id = ?");
+    params.push(filter.uyushmaId);
   }
   if (filter?.query) {
     // Cast a wide net: a person searching "logistics" means the industry or
@@ -145,13 +178,16 @@ export async function companies(filter?: {
   return await all<CompanyRow>(
     `SELECT p.*,
             u.full_name AS owner_name,
+            y.name AS uyushma_name,
             (SELECT COUNT(*) FROM meetings m WHERE m.company_id = p.id) AS meetings,
+            (SELECT COUNT(DISTINCT pt.project_id) FROM project_threads pt WHERE pt.company_id = p.id) AS projects,
             (SELECT COUNT(*) FROM agreements a WHERE a.company_id = p.id) AS agreements,
             (SELECT COUNT(*) FROM agreements a
               WHERE a.company_id = p.id AND a.status IN ('NEW','IN_PROGRESS')) AS open_agreements,
             (SELECT COUNT(*) FROM contacts c WHERE c.company_id = p.id) AS contacts
        FROM partners p
        LEFT JOIN users u ON u.id = p.owner_user_id
+       LEFT JOIN uyushmalar y ON y.id = p.uyushma_id
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       ORDER BY COALESCE(p.last_contact_at, p.last_seen, p.created_at) DESC
       LIMIT 300`,
@@ -184,6 +220,12 @@ const COMPANY_FIELDS = [
   "next_contact_at",
   "notes",
   "owner_user_id",
+  "deal_value",
+  "deal_currency",
+  "next_step",
+  "next_step_on",
+  "verification",
+  "uyushma_id",
 ] as const;
 
 export type CompanyInput = Partial<
@@ -195,14 +237,139 @@ export async function createCompany(input: CompanyInput): Promise<number> {
   // RETURNING, not `SELECT MAX(id)`: the old pair was only correct while a
   // single process wrote to a single file, which is exactly what moving to a
   // server ends.
-  return await insert(
-    `INSERT INTO partners (${columns.join(",")}, first_seen, last_seen, created_at, updated_at)
-     VALUES (${columns.map(() => "?").join(",")},?,?,?,?)`,
+  const id = await insert(
+    `INSERT INTO partners (${columns.join(",")}, first_seen, last_seen, created_at, updated_at, stage, stage_since)
+     VALUES (${columns.map(() => "?").join(",")},?,?,?,?,'NEW_CONTACT',?)`,
     ...columns.map((key) => input[key] ?? null),
     now(),
     now(),
     now(),
     now(),
+    now(),
+  );
+  // Stage 1 of the path: the company is in the base (TZ 6.2).
+  await run(
+    "INSERT INTO partner_stage_history (partner_id, from_stage, to_stage, reason, changed_by, changed_at) VALUES (?, NULL, 'NEW_CONTACT', 'manual', ?, ?)",
+    id,
+    input.owner_user_id ?? null,
+    now(),
+  );
+  return id;
+}
+
+/* ------------------------------------------------------------------ */
+/* The partnership path (TZ 6.2)                                       */
+/* ------------------------------------------------------------------ */
+
+export interface StageMove {
+  id: number;
+  from_stage: Stage | null;
+  to_stage: Stage;
+  reason: string;
+  note: string | null;
+  changed_by: number | null;
+  changed_by_name: string | null;
+  changed_at: string;
+}
+
+/**
+ * Moves a company to a stage and writes the move down. The status every
+ * existing filter understands follows the stage. Backwards moves are
+ * allowed from the card (a negotiation that reopens is a fact), never from
+ * a recorded event.
+ */
+export async function moveStage(
+  partnerId: number,
+  to: Stage,
+  by: number | null,
+  options: { reason?: "manual" | "meeting" | "kelishuv" | "contract"; note?: string | null } = {},
+): Promise<boolean> {
+  const current = await get<{ stage: Stage }>("SELECT stage FROM partners WHERE id = ?", partnerId);
+  if (!current || current.stage === to) return false;
+  await tx(async (q) => {
+    await q.run(
+      "UPDATE partners SET stage = ?, stage_since = ?, status = ?, updated_at = ? WHERE id = ?",
+      to,
+      now(),
+      statusFromStage(to),
+      now(),
+      partnerId,
+    );
+    await q.run(
+      "INSERT INTO partner_stage_history (partner_id, from_stage, to_stage, reason, note, changed_by, changed_at) VALUES (?,?,?,?,?,?,?)",
+      partnerId,
+      current.stage,
+      to,
+      options.reason ?? "manual",
+      options.note ?? null,
+      by,
+      now(),
+    );
+  });
+  return true;
+}
+
+/**
+ * A recorded event lifts the company to the stage it earns, never lower:
+ * a meeting filed with a company already negotiating changes nothing.
+ */
+export async function advanceStage(
+  partnerId: number | null | undefined,
+  event: "meeting" | "kelishuv" | "contract",
+  by: number | null,
+  note?: string | null,
+): Promise<boolean> {
+  if (!partnerId) return false;
+  const current = await get<{ stage: Stage }>("SELECT stage FROM partners WHERE id = ?", partnerId);
+  if (!current) return false;
+  const to = stageFor(event);
+  if (!isAdvance(current.stage, to)) return false;
+  return await moveStage(partnerId, to, by, { reason: event, note: note ?? null });
+}
+
+export async function stageHistory(partnerId: number): Promise<StageMove[]> {
+  return await all<StageMove>(
+    `SELECT h.id, h.from_stage, h.to_stage, h.reason, h.note, h.changed_by, u.full_name AS changed_by_name, h.changed_at
+       FROM partner_stage_history h LEFT JOIN users u ON u.id = h.changed_by
+      WHERE h.partner_id = ? ORDER BY h.id DESC LIMIT 50`,
+    partnerId,
+  );
+}
+
+/** How many companies stand at each stage — the funnel. */
+export async function funnel(): Promise<Record<Stage, number>> {
+  const rows = await all<{ stage: Stage; n: number }>("SELECT stage, COUNT(*) AS n FROM partners GROUP BY stage");
+  const out = {} as Record<Stage, number>;
+  for (const row of rows) out[row.stage] = Number(row.n);
+  return out;
+}
+
+/** Companies past their stage's limit, with their owner, for the sweep and the card. */
+export async function stuckCompanies(limits: Record<Stage, number>): Promise<(CompanyRow & { days: number })[]> {
+  const rows = await companies();
+  const today = new Date();
+  return rows
+    .filter((row) => isStuck(row.stage, row.stage_since, limits, today))
+    .map((row) => ({ ...row, days: daysIn(row.stage_since, today) ?? 0 }));
+}
+
+/**
+ * The projects whose journal has a thread about this company, within the
+ * viewer's reach (TZ 6.2 "bog'liq loyihalar"). A thread is the only link a
+ * company has to a project today, so this is where the list comes from.
+ */
+export async function projectsOf(
+  companyId: number,
+  viewer: Viewer,
+): Promise<{ id: number; code: string; name: string; phase: string | null; threads: number }[]> {
+  const scope = projectScope(viewer);
+  return await all(
+    `SELECT l.id, l.code, l.name, l.phase, COUNT(pt.id) AS threads
+       FROM project_threads pt JOIN loyihalar l ON l.id = pt.project_id
+      WHERE pt.company_id = ? AND ${scope.sql}
+      GROUP BY l.id, l.code, l.name, l.phase ORDER BY l.code`,
+    companyId,
+    ...scope.params,
   );
 }
 

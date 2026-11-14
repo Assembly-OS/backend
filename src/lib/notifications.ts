@@ -215,7 +215,63 @@ export async function sweepReminders(): Promise<number> {
     });
     fired++;
   }
-  return fired + (await sweepKelishuvTerms()) + (await sweepSilentTasks());
+  return fired + (await sweepKelishuvTerms()) + (await sweepSilentTasks()) + (await sweepStuckPartners());
+}
+
+/* ------------------------------------------------------------------ */
+/* Companies stuck on the partnership path (TZ 6.2)                    */
+/* ------------------------------------------------------------------ */
+
+const STUCK_LABELS: Record<string, string> = {
+  uz: "Hamkorlik qotib qoldi",
+  uzc: "Ҳамкорлик қотиб қолди",
+  ru: "Партнёрство застряло",
+  en: "A partnership is stuck",
+};
+
+/**
+ * Tells the company's owner when it has sat at a stage past the stage's
+ * limit ("Qotib qolgan"). Once per stay: keyed on the moment the stage
+ * began, so a move to the next stage closes it and only a new overstay
+ * rings again. Companies nobody owns ring the chairman's side instead.
+ */
+async function sweepStuckPartners(): Promise<number> {
+  const { stageLimits } = await import("./settings");
+  const { isStuck } = await import("./crm-stages");
+  const limits = await stageLimits();
+  const rows = await all<{
+    id: number;
+    name: string;
+    stage: keyof typeof limits;
+    stage_since: string | null;
+    owner_user_id: number | null;
+  }>("SELECT id, name, stage, stage_since, owner_user_id FROM partners WHERE stage <> 'CLOSED' AND stage_since IS NOT NULL");
+  const today = new Date();
+  let fired = 0;
+  for (const row of rows) {
+    if (!isStuck(row.stage, row.stage_since, limits, today)) continue;
+    const recipients = row.owner_user_id
+      ? [row.owner_user_id]
+      : (await all<{ id: number }>("SELECT id FROM users WHERE role = 'RAIS' AND is_active = 1")).map((u) => u.id);
+    for (const userId of recipients) {
+      const label = STUCK_LABELS[await langOf(userId)] ?? STUCK_LABELS.uz;
+      if (
+        await notify({
+          userId,
+          kind: "agreement",
+          title: `${label} · ${row.name}`,
+          body: `${row.stage} · ${row.stage_since!.slice(0, 10)}`,
+          href: `/companies/${row.id}`,
+          entity: "partner-stuck",
+          // The stay, not the company: a later overstay is a new notice.
+          entityId: Number(row.stage_since!.replace(/\D/g, "").slice(0, 12)) + row.id,
+          push: true,
+        })
+      )
+        fired++;
+    }
+  }
+  return fired;
 }
 
 /* ------------------------------------------------------------------ */

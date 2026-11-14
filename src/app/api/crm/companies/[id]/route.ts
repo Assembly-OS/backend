@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { canDelete, canWrite } from "@/lib/crm-access";
 import { COMPANY_STATUSES, companyById, updateCompany } from "@/lib/crm";
+import { CURRENCIES } from "@/lib/kelishuv-fields";
+import { VERIFICATIONS } from "@/lib/crm-stages";
 import { actingAs } from "@/lib/archive";
 import { get, tx } from "@/lib/pg";
 import { id as parseId, oneOf, str } from "@/lib/validate";
@@ -28,10 +30,17 @@ export async function PATCH(
     ["services", 2000], ["country", 80], ["city", 80], ["address", 300],
     ["website", 200], ["email", 160], ["phone", 60], ["head_name", 160],
     ["head_position", 120], ["started_at", 10], ["next_contact_at", 10],
-    ["notes", 4000],
+    ["notes", 4000], ["next_step", 300], ["next_step_on", 10],
   ] as const) {
     if (key in body) patch[key] = str(body[key], max);
   }
+  if ("uyushma_id" in body) patch.uyushma_id = parseId(body.uyushma_id);
+  if ("verification" in body) patch.verification = oneOf(body.verification, VERIFICATIONS, "NOT_CHECKED");
+  if ("deal_value" in body) {
+    const n = Number(body.deal_value);
+    patch.deal_value = Number.isFinite(n) && n > 0 ? n : null;
+  }
+  if ("deal_currency" in body) patch.deal_currency = oneOf(body.deal_currency, CURRENCIES, "USD");
   if ("status" in body)
     patch.status = oneOf(body.status, COMPANY_STATUSES, "POTENTIAL");
   if ("owner_user_id" in body) patch.owner_user_id = parseId(body.owner_user_id);

@@ -258,6 +258,7 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
           description: "Narrow to some kinds of record. Omit to search everything.",
         },
         project_id: { type: "integer" },
+        uyushma_id: { type: "integer", description: "Narrow to one association's records." },
         from: { type: "string", description: "YYYY-MM-DD, inclusive: only records from this day on." },
         to: { type: "string", description: "YYYY-MM-DD, inclusive: only records up to this day." },
         limit: { type: "integer", description: "1–20, default 8." },
@@ -324,6 +325,7 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       type: "object",
       properties: {
         project_id: { type: "integer" },
+        uyushma_id: { type: "integer" },
         person_id: { type: "integer" },
         company_id: { type: "integer" },
         task_id: { type: "integer" },
@@ -650,6 +652,7 @@ async function runTool(
       const hits = await searchKnowledge(context.user, String(input.query ?? ""), {
         kinds: kindsOf(input.kinds),
         projectId: input.project_id ? Number(input.project_id) : null,
+        uyushmaId: input.uyushma_id ? Number(input.uyushma_id) : null,
         from: dateOr(input.from),
         to: dateOr(input.to),
         limit: Math.min(20, Math.max(1, Number(input.limit) || 8)),
@@ -780,6 +783,7 @@ async function runTool(
     case "list_sources": {
       const rows = await sourcesAbout(context.user, {
         projectId: input.project_id ? Number(input.project_id) : null,
+        uyushmaId: input.uyushma_id ? Number(input.uyushma_id) : null,
         personId: input.person_id ? Number(input.person_id) : null,
         companyId: input.company_id ? Number(input.company_id) : null,
         taskId: input.task_id ? Number(input.task_id) : null,
