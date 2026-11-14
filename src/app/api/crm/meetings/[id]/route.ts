@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
-import { canWrite, crmRole } from "@/lib/crm-access";
+import { mayEditMeeting } from "@/lib/meeting-visibility";
 import { touchCompany } from "@/lib/crm";
 import { setMeetingLinks } from "@/lib/meetings";
 import { get, now, tx } from "@/lib/pg";
@@ -16,9 +16,9 @@ import { raiseNextStep, readMeetingInput } from "../input";
  * transcript as a suggestion, and a person reviews and completes them.
  *
  * The person who filed it, the person answering for its next step, and the
- * chairman and his assistant may edit it. Anyone else who may write in the
- * CRM can read it but not rewrite somebody else's account of a meeting they
- * were not responsible for.
+ * chairman and his assistant may edit it (`mayEditMeeting`). Anyone else who
+ * can read it cannot rewrite somebody else's account of a meeting they were
+ * not responsible for.
  */
 export async function PATCH(
   request: Request,
@@ -26,8 +26,6 @@ export async function PATCH(
 ) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
-  if (!canWrite(user))
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const meetingId = parseId((await params).id);
   if (!meetingId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
@@ -38,11 +36,7 @@ export async function PATCH(
   }>("SELECT owner_id, responsible_id FROM meetings WHERE id = ?", meetingId);
   if (!meeting) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
-  const mayEdit =
-    meeting.owner_id === user.id ||
-    meeting.responsible_id === user.id ||
-    crmRole(user) === "admin";
-  if (!mayEdit)
+  if (!mayEditMeeting(user, meeting))
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const body = (await request.json()) as Record<string, unknown>;

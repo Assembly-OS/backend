@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { all } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { renderWeeklyText, weeklyReport } from "@/lib/reports";
-import { isManager } from "@/lib/types";
+import { isManager, MANAGER_ROLES } from "@/lib/types";
 
 /**
  * The weekly report, in two shapes for two callers:
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
             await all<{ id: number; telegram_id: number | null }>(
               `SELECT id, telegram_id FROM users
                 WHERE is_active = 1 AND telegram_id IS NOT NULL
-                  AND role IN ('RAIS','UYUSHMA_RAISI','LOYIHA_RAHBARI','BOLIM_RAHBARI','AI_LAB')`,
+                  AND role IN (${MANAGER_ROLES.map((role) => `'${role}'`).join(",")})`,
             )
           ).map((row) => row.id)
         : [],

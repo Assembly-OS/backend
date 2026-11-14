@@ -3,6 +3,7 @@ import { all, insert, now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { str } from "@/lib/validate";
+import { isExternal } from "@/lib/types";
 
 /**
  * Creates a group conversation. Anyone may start one and invite any active
@@ -12,6 +13,10 @@ import { str } from "@/lib/validate";
 export async function POST(request: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
+  // A group is a slice of the staff list, which is closed to people outside
+  // the Assembly (TZ 4.3); they write to their contacts one to one.
+  if (isExternal(user.role))
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const body = (await request.json()) as {
     title?: unknown;

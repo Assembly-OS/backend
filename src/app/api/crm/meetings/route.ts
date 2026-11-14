@@ -3,6 +3,7 @@ import { get, now, tx } from "@/lib/pg";
 import { setMeetingLinks } from "@/lib/meetings";
 import { raiseNextStep, readMeetingInput } from "./input";
 import { currentUser } from "@/lib/session";
+import { mayRecordMeeting } from "@/lib/meeting-visibility";
 import { canWrite } from "@/lib/crm-access";
 import { createAgreement, touchCompany } from "@/lib/crm";
 import { runMeetingIntake } from "@/lib/agents/intake-runner";
@@ -24,7 +25,9 @@ import { id as parseId, oneOf, str } from "@/lib/validate";
 export async function POST(request: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
-  if (!canWrite(user))
+  // TZ 4.2: every member of staff files the meetings he sat in, and an
+  // association's representative his association's.
+  if (!mayRecordMeeting(user))
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const body = (await request.json()) as Record<string, unknown>;
@@ -98,7 +101,9 @@ export async function POST(request: Request) {
 
   // Optional analysis. Long enough to be worth a run, and only when asked.
   let analysis: Awaited<ReturnType<typeof runMeetingIntake>> | null = null;
-  if (body.analyze === true && transcript.trim().length >= 40) {
+  // The CRM's writers, as before block 4 widened who may file (see the
+  // prefill route for why).
+  if (body.analyze === true && canWrite(user) && transcript.trim().length >= 40) {
     analysis = await runMeetingIntake(user, meetingId, title, transcript, lang);
     agreements += await agreementsFromAnalysis(meetingId, companyId, user.id);
   }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { now, run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
-import { thread, userByLogin } from "@/lib/queries";
+import { canMessage, thread, userByLogin } from "@/lib/queries";
 import { str } from "@/lib/validate";
 import {
   MAX_BYTES,
@@ -31,6 +31,8 @@ export async function POST(
   if (!other) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
   if (other.id === user.id)
     return NextResponse.json({ error: "SELF" }, { status: 400 });
+  if (!(await canMessage(user, other)))
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   let form: FormData;
   try {

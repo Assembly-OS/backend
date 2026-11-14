@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { canManageProjects } from "@/lib/project-access";
-import { createThread, projectById, threadsOf } from "@/lib/project-threads";
+import { createThread, threadsOf } from "@/lib/project-threads";
+import { projectRights } from "@/lib/project-visibility";
 import { id as parseId, str } from "@/lib/validate";
 
 /** The threads of one project — the sidebar, as data. */
@@ -14,6 +15,10 @@ export async function GET(
 
   const projectId = parseId((await params).id);
   if (!projectId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
+  // The journal is the staff's; an outside lead sees the project's card only.
+  const rights = await projectRights(user, projectId);
+  if (!rights?.internal)
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const archived = new URL(request.url).searchParams.get("archived") === "1";
   return NextResponse.json(await threadsOf(projectId, archived));
@@ -29,13 +34,13 @@ export async function POST(
 ) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
-  if (!canManageProjects(user))
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const projectId = parseId((await params).id);
-  const project = projectId ? await projectById(projectId) : undefined;
-  if (!project)
+  const project = projectId ? await projectRights(user, projectId) : null;
+  if (!project?.internal)
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  if (!canManageProjects(user))
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const body = (await request.json()) as Record<string, unknown>;
   const title = str(body.title, 120);

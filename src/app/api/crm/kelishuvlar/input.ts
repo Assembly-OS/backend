@@ -8,6 +8,7 @@ import {
   type KelishuvKind,
   type KelishuvStatus,
 } from "@/lib/kelishuvlar";
+import { projectRights } from "@/lib/project-visibility";
 import type { User } from "@/lib/types";
 import { id as parseId, oneOf, str } from "@/lib/validate";
 
@@ -67,12 +68,14 @@ async function existing(
  */
 export async function readKelishuvInput(
   body: Record<string, unknown>,
+  user: User,
 ): Promise<{ ok: true; input: KelishuvInput } | { ok: false; error: string }> {
   const title = str(body.title, 160);
   if (!title) return { ok: false, error: "TITLE_REQUIRED" };
 
   const loyihaId = parseId(body.loyiha_id);
-  if (loyihaId && !(await get("SELECT id FROM loyihalar WHERE id = ?", loyihaId)))
+  // A project the author cannot see (TZ 4.2) is, for them, one that is gone.
+  if (loyihaId && !(await projectRights(user, loyihaId)))
     return { ok: false, error: "GONE" };
 
   const meetingId = parseId(body.meeting_id);

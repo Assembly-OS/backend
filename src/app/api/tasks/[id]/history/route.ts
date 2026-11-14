@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { get } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { declineReason, taskHistory } from "@/lib/project-threads";
+import { canSeeTask } from "@/lib/task-visibility";
 import { id as parseId } from "@/lib/validate";
 
 /**
@@ -10,6 +10,9 @@ import { id as parseId } from "@/lib/validate";
  * Fetched on demand rather than loaded with the page: a thread can carry two
  * dozen assignments, and reading every one of their histories to render a
  * panel almost nobody opens would be two dozen queries spent on nothing.
+ *
+ * Read by whoever `canSeeTask` allows; anyone else is told there is no such
+ * task, so an id does not confirm what is behind it.
  */
 export async function GET(
   _request: Request,
@@ -21,11 +24,8 @@ export async function GET(
   const taskId = parseId((await params).id);
   if (!taskId) return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
 
-  const task = await get<{ id: number }>(
-    "SELECT id FROM tasks WHERE id = ?",
-    taskId,
-  );
-  if (!task) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  if (!(await canSeeTask(user, taskId)))
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const [events, reason] = await Promise.all([
     taskHistory(taskId),

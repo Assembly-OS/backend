@@ -3,6 +3,7 @@ import { run } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { canWriteEntries } from "@/lib/project-access";
 import { entryById } from "@/lib/project-threads";
+import { entryRights } from "@/lib/project-visibility";
 import { read, resolvePath } from "@/lib/uploads";
 import { mimeForKey, readAttachment } from "@/lib/agents/read-file";
 import { id as parseId } from "@/lib/validate";
@@ -26,12 +27,14 @@ export async function POST(
 ) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
-  if (!canWriteEntries())
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   const entryId = parseId((await params).id);
   const entry = entryId ? await entryById(entryId) : undefined;
-  if (!entry?.file_key || !entry.file_name)
+  const rights = entry ? await entryRights(user, entry.id) : null;
+  if (!entry || !rights) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  if (!canWriteEntries(rights))
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  if (!entry.file_key || !entry.file_name)
     return NextResponse.json({ error: "NO_FILE" }, { status: 404 });
 
   const mime = mimeForKey(entry.file_key);

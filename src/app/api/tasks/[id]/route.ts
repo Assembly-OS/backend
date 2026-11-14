@@ -4,7 +4,7 @@ import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { notifyBot } from "@/lib/notify-bot";
 import { notify } from "@/lib/notifications";
-import { authorizeTransition, STAGE_STARTED } from "@/lib/task-machine";
+import { authorizeTransition, missingText, STAGE_STARTED } from "@/lib/task-machine";
 import { MAX_BYTES, safeName, store } from "@/lib/uploads";
 import { str } from "@/lib/validate";
 import type { Task } from "@/lib/types";
@@ -77,6 +77,11 @@ export async function POST(
   const stamp = now();
   const text = comment?.trim() || null;
   const stage = task.current_stage;
+
+  // After the state check, so a request that was never allowed is told that
+  // rather than asked for words it could not have used.
+  const missing = missingText(action ?? "", text);
+  if (missing) return NextResponse.json({ error: missing }, { status: 400 });
 
   /**
    * Written after the transition is authorised and before it is applied. The

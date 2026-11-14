@@ -92,6 +92,31 @@ function isAction(value: string): value is TaskAction {
   return value in TASK_RULES;
 }
 
+export type MissingText = "RESULT_REQUIRED" | "REASON_REQUIRED";
+
+/**
+ * Actions refused without words, TZ block 3.4.
+ *
+ * The result is the thing the reviewer checks — "the reviewer checks the
+ * result, not the status" — so work cannot be handed in without one. A refusal
+ * or a return without its reason is a stop sign with nothing written on it:
+ * the other side can only phone to ask why.
+ */
+export const TEXT_REQUIRED: Partial<Record<TaskAction, MissingText>> = {
+  submit: "RESULT_REQUIRED",
+  reject: "REASON_REQUIRED",
+  return: "REASON_REQUIRED",
+};
+
+/** The error to refuse with when `action` needs text and `text` is blank. */
+export function missingText(
+  action: string,
+  text: string | null | undefined,
+): MissingText | null {
+  const needed = isAction(action) ? TEXT_REQUIRED[action] : undefined;
+  return needed && !text?.trim() ? needed : null;
+}
+
 /**
  * Decide whether `userId` may apply `action` to `task`:
  *  - BAD_ACTION  — no such transition

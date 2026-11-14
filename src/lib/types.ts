@@ -1,10 +1,13 @@
 export type Role =
   | "RAIS"
-  | "UYUSHMA_RAISI"
-  | "LOYIHA_RAHBARI"
+  | "KLASTER_RAHBARI"
   | "BOLIM_RAHBARI"
+  | "LOYIHA_RAHBARI"
   | "AI_LAB"
-  | "ISHCHI";
+  | "ISHCHI"
+  | "TASHQI_LOYIHA_RAHBARI"
+  | "UYUSHMA_RAISI"
+  | "UYUSHMA_VAKILI";
 
 export type Department = "GR" | "FR" | "BR" | "PR" | "AI_LAB";
 
@@ -21,14 +24,41 @@ export type Priority = "PAST" | "ORTA" | "YUQORI" | "KRITIK";
 
 export type Locale = "uz" | "uzc" | "ru" | "en";
 
+// Staff first, then the people outside the Assembly (TZ 4.1): the order the
+// role picker lists them in.
 export const ROLES: Role[] = [
   "RAIS",
-  "UYUSHMA_RAISI",
-  "LOYIHA_RAHBARI",
+  "KLASTER_RAHBARI",
   "BOLIM_RAHBARI",
+  "LOYIHA_RAHBARI",
   "AI_LAB",
   "ISHCHI",
+  "TASHQI_LOYIHA_RAHBARI",
+  "UYUSHMA_RAISI",
+  "UYUSHMA_VAKILI",
 ];
+
+/**
+ * People who work with the Assembly without working in it (TZ 4.1, 4.3): an
+ * outside project lead, an association's chairman and its representative —
+ * the one who carries the association's business to the Assembly and back.
+ * They see their own project or their own association and nothing else, take
+ * no assignments and hand out none.
+ */
+export const EXTERNAL_ROLES: Role[] = [
+  "TASHQI_LOYIHA_RAHBARI",
+  "UYUSHMA_RAISI",
+  "UYUSHMA_VAKILI",
+];
+
+export function isExternal(role: Role): boolean {
+  return EXTERNAL_ROLES.includes(role);
+}
+
+/** The two association roles, which are scoped by `users.uyushma_id`. */
+export function isAssociationRole(role: Role): boolean {
+  return role === "UYUSHMA_RAISI" || role === "UYUSHMA_VAKILI";
+}
 
 export const DEPARTMENTS: Department[] = ["GR", "FR", "BR", "PR", "AI_LAB"];
 
@@ -54,6 +84,10 @@ export interface User {
   uyushma_id: number | null;
   loyiha_id: number | null;
   manager_id: number | null;
+  /** A cluster head's cluster (TZ 4.1); null for everyone else. */
+  klaster_id: number | null;
+  /** 1 when the chairman has granted the global AI view (TZ 4.2). */
+  global_ai: number;
   phone: string | null;
   email: string | null;
   lang: Locale;
@@ -116,6 +150,15 @@ export interface Task {
   stage_count: number;
   /** Who approves the CURRENT stage. NULL = the author, as it always was. */
   reviewer_user_id: number | null;
+  /** Deadline-bound or open-ended, TZ block 3.1. */
+  kind: TaskKind;
+  /** How often open-ended work is reported on. NULL on deadline-bound work. */
+  report_rhythm: ReportRhythm | null;
+  /** The figure open-ended work is aiming at, when it has one. */
+  target_value: number | null;
+  target_unit: string | null;
+  /** Where the rhythm starts counting for work that predates it. */
+  silence_from: string | null;
 }
 
 /**
@@ -164,6 +207,12 @@ export interface TaskRow extends Task {
   /** When the report credits this person with finishing it. Set only by
    *  `completedTasks`; absent on every list of the assignment pipeline. */
   completed_at?: string | null;
+  /** The newest entry in the progress journal, if any. */
+  last_report_at: string | null;
+  /** The newest figure reported, for progress against `target_value`. */
+  last_metric: number | null;
+  /** Open-ended, taken on, and quiet past its rhythm — "Jim". */
+  is_silent: boolean;
 }
 
 /**
@@ -205,10 +254,14 @@ export interface Message {
   read_at: string | null;
 }
 
-/** Roles that command a vertical: they may hand out tasks and review results. */
+/**
+ * Roles that command a vertical: they may hand out tasks and review results.
+ * The association chairman left this list with block 4 — he is outside the
+ * Assembly and hands its staff no work (the owner's call, 2026-09-21).
+ */
 export const MANAGER_ROLES: Role[] = [
   "RAIS",
-  "UYUSHMA_RAISI",
+  "KLASTER_RAHBARI",
   "LOYIHA_RAHBARI",
   "BOLIM_RAHBARI",
   "AI_LAB",
@@ -223,6 +276,17 @@ export const MANAGER_ROLES: Role[] = [
 export const TASK_SCOPES = ["HAFTALIK", "UMUMIY"] as const;
 export type TaskScope = (typeof TASK_SCOPES)[number];
 
+/**
+ * TZ block 3.1. MUDDATLI: the execution is the person's own, so it has a
+ * deadline. MUDDATSIZ: it depends on an outside party, so it has a report
+ * rhythm instead, and silence past the rhythm is what gets flagged.
+ */
+export const TASK_KINDS = ["MUDDATLI", "MUDDATSIZ"] as const;
+export type TaskKind = (typeof TASK_KINDS)[number];
+
+export const REPORT_RHYTHMS = ["WEEKLY", "MONTHLY"] as const;
+export type ReportRhythm = (typeof REPORT_RHYTHMS)[number];
+
 export function isManager(role: Role): boolean {
   return MANAGER_ROLES.includes(role);
 }
@@ -232,7 +296,9 @@ export function isManager(role: Role): boolean {
  * work to the chairman, so the inbox/execute pages do not apply to that role.
  */
 export function receivesTasks(role: Role): boolean {
-  return role !== "RAIS";
+  // Nor to anyone outside the Assembly: an external user's part is the
+  // project's status and the association's meetings, not the task queue.
+  return role !== "RAIS" && !isExternal(role);
 }
 
 /**

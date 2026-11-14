@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
-import { projectById, searchEntries, threadById } from "@/lib/project-threads";
+import { searchEntries, threadById } from "@/lib/project-threads";
+import { projectRights } from "@/lib/project-visibility";
 import { id as parseId, str } from "@/lib/validate";
 
 /**
@@ -18,8 +19,10 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
 
   const projectId = parseId((await params).id);
-  const project = projectId ? await projectById(projectId) : undefined;
-  if (!project) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  // The journal's words, and what the memory makes of them, are the staff's.
+  const project = projectId ? await projectRights(user, projectId) : null;
+  if (!project?.internal)
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   const url = new URL(request.url);
   const query = str(url.searchParams.get("q"), 200);

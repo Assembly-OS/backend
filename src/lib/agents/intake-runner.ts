@@ -1,6 +1,7 @@
 import { all, get, insert, now, run } from "@/lib/pg";
 import { notifyBot } from "@/lib/notify-bot";
 import { assignableUsers } from "@/lib/queries";
+import { projectOptions } from "@/lib/project-visibility";
 import { createAssignment } from "@/lib/assignments";
 import type { User } from "@/lib/types";
 import {
@@ -121,9 +122,9 @@ export async function prefillMeeting(
       "SELECT id, login, full_name, position FROM users WHERE is_active = 1 ORDER BY full_name",
     ),
     assignableUsers(owner),
-    all<{ id: number; code: string; name: string }>(
-      "SELECT id, code, name FROM loyihalar ORDER BY code LIMIT 300",
-    ),
+    // Only the projects the author can see (TZ 4.2): the model cannot suggest
+    // linking what the form would not let them pick.
+    projectOptions(owner).then((rows) => rows.slice(0, 300)),
     // Most recently in contact first. The model is shown the first few
     // hundred, to spell a name the way it was filed; every company is still
     // matched by name afterwards.

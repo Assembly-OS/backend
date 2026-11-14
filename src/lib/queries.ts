@@ -3,11 +3,13 @@ import {
   doneSql,
   openSql,
   overdueSql,
+  silentSql,
   statusList,
   CLOSED_STATUSES,
 } from "./metrics";
 import { seesEverything } from "./oversight";
-import { isManager } from "./types";
+import { projectScope, type Viewer } from "./project-visibility";
+import { EXTERNAL_ROLES, isExternal, isManager } from "./types";
 import type {
   MessageKind,
   QueuedTaskRow,
@@ -56,7 +58,14 @@ const TASK_SELECT = `
          (SELECT string_agg(su.full_name, ',' ORDER BY s2.position)
             FROM task_stages s2 JOIN users su ON su.id = s2.to_user_id
            WHERE s2.task_id = t.id AND t.stage_count > 1) AS stage_names,
-         ${RETURN_COMMENT} AS return_comment
+         ${RETURN_COMMENT} AS return_comment,
+         -- The progress journal, TZ 3.2: when it was last written, the last
+         -- figure in it, and whether the work has gone quiet past its rhythm.
+         (SELECT MAX(p.created_at) FROM task_progress p WHERE p.task_id = t.id) AS last_report_at,
+         (SELECT p.metric FROM task_progress p
+           WHERE p.task_id = t.id AND p.metric IS NOT NULL
+           ORDER BY p.id DESC LIMIT 1) AS last_metric,
+         (${silentSql("t")}) AS is_silent
   FROM tasks t
   JOIN users uf ON uf.id = t.from_user_id
   JOIN users ut ON ut.id = t.to_user_id
@@ -265,6 +274,9 @@ export async function subordinates(userId: number): Promise<User[]> {
   );
 }
 
+/** SQL list of the roles that take no assignments: the chairman, outsiders. */
+const TAKES_NO_WORK = ["RAIS", ...EXTERNAL_ROLES].map((role) => `'${role}'`).join(",");
+
 /** Who this user is allowed to hand an assignment to. */
 export async function assignableUsers(user: User): Promise<User[]> {
   // The chairman, and whoever acts as his hands, may hand work to anyone. For
@@ -277,10 +289,39 @@ export async function assignableUsers(user: User): Promise<User[]> {
   // to him was accepted by the API and then seen by no one. It was also how he
   // came to be offered under "My team" in the audit. The API validates the
   // assignee against this same list, so excluding him here closes both.
+  // Nor may anyone outside the Assembly be handed work, nor hand it out
+  // (TZ 4.3): their part is a project's status or an association's meetings.
+  if (isExternal(user.role)) return [];
   if (seesEverything(user)) {
     return await all<User>(
-      `SELECT * FROM users WHERE is_active = 1 AND role <> 'RAIS'
+      `SELECT * FROM users WHERE is_active = 1 AND role NOT IN (${TAKES_NO_WORK})
        ORDER BY role, full_name`,
+    );
+  }
+  if (user.role === "LOYIHA_RAHBARI") {
+    // TZ 4.2: a project lead assigns "to the team" — himself, whoever reports
+    // to him, and the staff attached to the projects he is attached to.
+    return await all<User>(
+      `SELECT * FROM users u
+        WHERE u.is_active = 1 AND u.role NOT IN (${TAKES_NO_WORK})
+          AND (u.id = ? OR u.manager_id = ?
+               OR EXISTS (
+                 SELECT 1 FROM loyihalar l
+                  WHERE (l.owner_id = ? OR l.deputy_id = ?
+                         OR EXISTS (SELECT 1 FROM project_members me
+                                     WHERE me.project_id = l.id AND me.user_id = ?))
+                    AND (l.owner_id = u.id OR l.deputy_id = u.id
+                         OR EXISTS (SELECT 1 FROM project_members pm
+                                     WHERE pm.project_id = l.id AND pm.user_id = u.id))))
+        ORDER BY CASE WHEN u.id = ? THEN 0 WHEN u.manager_id = ? THEN 1 ELSE 2 END,
+                 u.role, u.full_name`,
+      user.id,
+      user.id,
+      user.id,
+      user.id,
+      user.id,
+      user.id,
+      user.id,
     );
   }
   if (user.role === "ISHCHI") {
@@ -291,16 +332,16 @@ export async function assignableUsers(user: User): Promise<User[]> {
       user.id,
     );
   }
-  // Heads: own staff, peer departments, association and project leads — and
+  // Heads: own staff, peer departments and cluster and project leads — and
   // themselves. Somebody whose work is entirely their own had no way to record
   // it: the chairman's assistant received nothing from anyone, so the execute
   // page stayed empty and there was never a result to submit.
   return await all<User>(
     `SELECT * FROM users
-     WHERE is_active = 1 AND role <> 'RAIS'
+     WHERE is_active = 1 AND role NOT IN (${TAKES_NO_WORK})
        AND (id = ?
             OR manager_id = ?
-            OR role IN ('BOLIM_RAHBARI','AI_LAB','UYUSHMA_RAISI','LOYIHA_RAHBARI'))
+            OR role IN ('KLASTER_RAHBARI','BOLIM_RAHBARI','AI_LAB','LOYIHA_RAHBARI'))
      ORDER BY CASE WHEN id = ? THEN 0 WHEN manager_id = ? THEN 1 ELSE 2 END,
               role, full_name`,
     user.id,
@@ -321,23 +362,65 @@ export interface DirectoryEntry {
   group: string;
 }
 
-/** Everyone a user can start a conversation with — the whole active staff. */
-export async function directory(excludeId: number): Promise<DirectoryEntry[]> {
+/**
+ * SQL: the people someone outside the Assembly may talk to (TZ 4.3, "writing
+ * to the Assembly's responsible person"): the member of staff they deal with
+ * (their `manager_id`), the leads of their own project, and the rest of their
+ * own association. Everyone else — the staff list itself — is closed to them.
+ */
+function contactsOf(viewer: User): { sql: string; params: (number | null)[] } {
+  return {
+    sql: `(u.id = ?
+           OR u.id IN (SELECT l.owner_id FROM loyihalar l
+                        JOIN project_members pm ON pm.project_id = l.id AND pm.user_id = ?
+                       UNION
+                       SELECT l.deputy_id FROM loyihalar l
+                        JOIN project_members pm ON pm.project_id = l.id AND pm.user_id = ?)
+           OR (u.uyushma_id = ? AND u.role IN ('UYUSHMA_RAISI', 'UYUSHMA_VAKILI')))`,
+    params: [viewer.manager_id ?? -1, viewer.id, viewer.id, viewer.uyushma_id ?? -1],
+  };
+}
+
+/**
+ * Everyone a user can start a conversation with: for the staff, the whole
+ * active staff and the Assembly's outside contacts; for someone outside it,
+ * their contacts only.
+ */
+export async function directory(viewer: User): Promise<DirectoryEntry[]> {
+  const scope = isExternal(viewer.role)
+    ? contactsOf(viewer)
+    : { sql: "TRUE", params: [] };
   return await all<DirectoryEntry>(
-    `SELECT id, login, full_name, role, department, position,
-            CASE role
+    `SELECT u.id, u.login, u.full_name, u.role, u.department, u.position,
+            CASE u.role
               WHEN 'RAIS' THEN 'RAIS'
               WHEN 'LOYIHA_RAHBARI' THEN 'LOYIHA'
+              WHEN 'TASHQI_LOYIHA_RAHBARI' THEN 'TASHQI'
               WHEN 'UYUSHMA_RAISI' THEN 'UYUSHMA'
-              ELSE COALESCE(department, 'RAIS')
+              WHEN 'UYUSHMA_VAKILI' THEN 'UYUSHMA'
+              ELSE COALESCE(u.department, 'RAIS')
             END AS "group"
-     FROM users
-     WHERE is_active = 1 AND id != ?
-     ORDER BY CASE role
+     FROM users u
+     WHERE u.is_active = 1 AND u.id != ? AND ${scope.sql}
+     ORDER BY CASE u.role
                 WHEN 'RAIS' THEN 0 WHEN 'BOLIM_RAHBARI' THEN 1 WHEN 'AI_LAB' THEN 2
                 ELSE 3 END,
-              full_name`,
-    excludeId,
+              u.full_name`,
+    viewer.id,
+    ...scope.params,
+  );
+}
+
+/** Whether `viewer` may write to `other` directly (TZ 4.3). */
+export async function canMessage(viewer: User, other: User): Promise<boolean> {
+  if (!isExternal(viewer.role)) return true;
+  const scope = contactsOf(viewer);
+  return Boolean(
+    await get(
+      `SELECT 1 FROM users u WHERE u.id = ? AND u.is_active = 1 AND ${scope.sql}`,
+      other.id,
+      ...scope.params,
+    ),
   );
 }
 
@@ -356,6 +439,9 @@ export interface Counters {
   sentActive: number;
   sentDone: number;
   sentOverdue: number;
+  /** Open-ended work gone quiet past its rhythm: mine, and what I handed out. */
+  silent: number;
+  sentSilent: number;
   unread: number;
   team: number;
 }
@@ -392,6 +478,8 @@ export async function counters(userId: number): Promise<Counters> {
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${openSql()}) AS "sentActive",
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${doneSql()}) AS "sentDone",
        (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${overdueSql()}) AS "sentOverdue",
+       (SELECT COUNT(*) FROM tasks WHERE to_user_id = ? AND ${silentSql()}) AS silent,
+       (SELECT COUNT(*) FROM tasks WHERE from_user_id = ? AND ${silentSql()}) AS "sentSilent",
        ${UNREAD_TOTAL} AS unread,
        (SELECT COUNT(*) FROM users WHERE manager_id = ? AND is_active = 1) AS team`,
     userId,
@@ -405,6 +493,8 @@ export async function counters(userId: number): Promise<Counters> {
     userId,
     userId,
     day, // sentOverdue
+    userId, // silent
+    userId, // sentSilent
     userId,
     userId,
     userId,
@@ -422,6 +512,8 @@ export async function counters(userId: number): Promise<Counters> {
       sentActive: 0,
       sentDone: 0,
       sentOverdue: 0,
+      silent: 0,
+      sentSilent: 0,
       unread: 0,
       team: 0,
     }
@@ -650,14 +742,18 @@ export interface ProjectRow {
   uyushma_name: string | null;
 }
 
-export async function projects(): Promise<ProjectRow[]> {
+/** The projects this person can see (TZ 4.2), furthest along first. */
+export async function projects(viewer: Viewer): Promise<ProjectRow[]> {
+  const scope = projectScope(viewer);
   return await all<ProjectRow>(
     `SELECT l.id, l.code, l.name, l.status, l.progress, l.budget, l.deadline,
             o.full_name AS owner_name, o.login AS owner_login, u.name AS uyushma_name
      FROM loyihalar l
      LEFT JOIN users o ON o.id = l.owner_id
      LEFT JOIN uyushmalar u ON u.id = l.uyushma_id
+     WHERE ${scope.sql}
      ORDER BY l.progress DESC`,
+    ...scope.params,
   );
 }
 

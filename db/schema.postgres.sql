@@ -1070,6 +1070,163 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- A project's documents, the last field of the passport in block 1.3: the
+-- master plan, the feasibility study (TIA), the ESG assessment, the legal
+-- papers. Optional in the TZ, and kept as their own rows because a project
+-- has several of each kind over its life. Removing one is a DELETE, which the
+-- archive trigger below copies whole, and the file itself stays on disk.
+CREATE TABLE IF NOT EXISTS project_documents (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  loyiha_id   INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  -- MASTER_PLAN | TIA | ESG | LEGAL | OTHER
+  kind        TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  file_key    TEXT NOT NULL,
+  file_name   TEXT NOT NULL,
+  file_size   INTEGER NOT NULL,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_documents ON project_documents(loyiha_id, id DESC);
+
+-- Two kinds of assignment, block 3.1 of the rebuild TZ.
+--
+-- MUDDATLI: the work is the person's own to do, so it carries a deadline and
+-- is judged against it. MUDDATSIZ: it waits on somebody outside the Assembly,
+-- so an invented deadline would only produce a false "overdue"; instead the
+-- person reports at a set rhythm, weekly or monthly, and silence past that
+-- rhythm is what gets flagged ("Jim", 3.2). Kept beside `scope`, which says
+-- how long the work is, not who it depends on.
+--
+-- `silence_from` is where the rhythm starts counting for rows that existed
+-- before it did: the day this ran, so nothing already open is declared silent
+-- on its first morning. The backfill touches only rows without a kind, so it
+-- does its work once and is a no-op on every later start.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS kind          TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS report_rhythm TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target_value  DOUBLE PRECISION;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS target_unit   TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS silence_from  TEXT;
+
+UPDATE tasks
+   SET kind = CASE WHEN deadline IS NULL THEN 'MUDDATSIZ' ELSE 'MUDDATLI' END,
+       report_rhythm = CASE WHEN deadline IS NULL THEN 'WEEKLY' END,
+       silence_from = CASE WHEN deadline IS NULL
+                           THEN to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') END
+ WHERE kind IS NULL;
+
+-- The progress journal of an open-ended assignment, 3.2: what was done and
+-- what it produced are required, the rest when there is something to say.
+CREATE TABLE IF NOT EXISTS task_progress (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  task_id     INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  author_id   INTEGER NOT NULL REFERENCES users(id),
+  did         TEXT NOT NULL,
+  outcome     TEXT NOT NULL,
+  metric      DOUBLE PRECISION,
+  blocker     TEXT,
+  help_needed TEXT,
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_progress ON task_progress(task_id, id DESC);
+
+-- Block 4.1: roles. A cluster head is scoped by the cluster they head, the
+-- two association roles by `uyushma_id` (which was already there), and the
+-- global AI view is a grant the chairman switches on per person rather than a
+-- property of a role (4.2: "not by role, by a separate permission").
+ALTER TABLE users ADD COLUMN IF NOT EXISTS klaster_id INTEGER
+  REFERENCES klasterlar(id) ON DELETE SET NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS global_ai INTEGER NOT NULL DEFAULT 0;
+
+-- Who is attached to a project (4.2: staff see "attached" projects). The
+-- project's owner and deputy are attached by those columns and need no row
+-- here; everyone else — a colleague on the work, an outside project lead —
+-- has one. Assigning work on a project attaches its assignee.
+CREATE TABLE IF NOT EXISTS project_members (
+  project_id INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  added_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  PRIMARY KEY (project_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
+
+-- Data changes that must run exactly once, recorded by name. A backfill that
+-- re-ran on every start would quietly re-attach whoever was detached since.
+CREATE TABLE IF NOT EXISTS schema_once (
+  key    TEXT PRIMARY KEY,
+  ran_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+
+-- Closing project visibility (4.2, the owner's call: strictly as the TZ says)
+-- must not hide a project from the people already working on it. So everyone
+-- the record shows at work on a project is attached to it first: whoever gave,
+-- took or reviewed an assignment on it, wrote in its journal or follows a
+-- thread, sat in one of its meetings, answers for one of its agreements.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_once WHERE key = 'project_members_backfill') THEN
+    INSERT INTO project_members (project_id, user_id)
+    SELECT DISTINCT links.project_id, links.user_id
+      FROM (
+        SELECT loyiha_id AS project_id, to_user_id AS user_id FROM tasks
+        UNION SELECT loyiha_id, from_user_id FROM tasks
+        UNION SELECT loyiha_id, reviewer_user_id FROM tasks
+        UNION SELECT t.loyiha_id, s.to_user_id
+                FROM task_stages s JOIN tasks t ON t.id = s.task_id
+        UNION SELECT th.project_id, e.author_id
+                FROM thread_entries e JOIN project_threads th ON th.id = e.thread_id
+        UNION SELECT th.project_id, m.user_id
+                FROM thread_members m JOIN project_threads th ON th.id = m.thread_id
+        UNION SELECT mp.project_id, ms.user_id
+                FROM meeting_projects mp JOIN meeting_staff ms ON ms.meeting_id = mp.meeting_id
+        UNION SELECT loyiha_id, responsible_id FROM kelishuvlar
+        UNION SELECT loyiha_id, id FROM users
+      ) links
+     WHERE links.project_id IS NOT NULL AND links.user_id IS NOT NULL
+       -- tasks.loyiha_id and users.loyiha_id carry no foreign key.
+       AND EXISTS (SELECT 1 FROM loyihalar l WHERE l.id = links.project_id)
+       AND EXISTS (SELECT 1 FROM users u WHERE u.id = links.user_id)
+    ON CONFLICT DO NOTHING;
+    INSERT INTO schema_once (key) VALUES ('project_members_backfill');
+  END IF;
+END;
+$$;
+
+-- TZ 4.4: the audit trail. Who did what, when: every create, change and
+-- delete (written by the trigger below), and every question put to the
+-- global AI view (written by the assistant). Read by the chairman and AI Lab
+-- only; never changed and never deleted — the trigger refuses both, whoever
+-- asks, so "the journal is not deleted" does not rest on the code being kind.
+-- `actor_id` has no foreign key on purpose: a removed account's history is
+-- exactly what the journal is for.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  at        TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  actor_id  INTEGER,
+  -- INSERT | UPDATE | DELETE | AI_GLOBAL
+  action    TEXT NOT NULL,
+  -- The table written, or 'assistant' for an AI question.
+  entity    TEXT NOT NULL,
+  entity_id TEXT,
+  detail    JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at     ON audit_log(id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_actor  ON audit_log(actor_id, id DESC);
+
+CREATE OR REPLACE FUNCTION audit_log_is_append_only() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_log is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS audit_log_append_only ON audit_log;
+CREATE TRIGGER audit_log_append_only BEFORE UPDATE OR DELETE ON audit_log
+  FOR EACH ROW EXECUTE FUNCTION audit_log_is_append_only();
+
 -- The memory contour, and the history of the work done against it. Chat,
 -- notifications, live-recording scratch rows and personal assistant history
 -- are left out on purpose: they are not the Assembly's record of anything.
@@ -1081,14 +1238,87 @@ BEGIN
     'loyihalar', 'project_threads', 'thread_entries',
     'meetings', 'meeting_conclusions', 'meeting_memory',
     'meeting_projects', 'meeting_staff', 'kelishuvlar', 'kelishuv_parties',
-    'klasterlar', 'project_stages',
+    'klasterlar', 'project_stages', 'project_documents',
     'agreements', 'partners', 'contacts', 'partner_notes', 'partner_ideas',
-    'tasks', 'task_events', 'task_stages'
+    'tasks', 'task_events', 'task_stages', 'task_progress',
+    'project_members'
   ] LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
     EXECUTE format(
       'CREATE TRIGGER archive_on_delete BEFORE DELETE ON %I '
       'FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()', t);
+  END LOOP;
+END;
+$$;
+
+-- TZ 4.4: every create, change and delete, written by the database so no
+-- route can forget one. The author is `app.user_id`, which the write path
+-- sets from the session (lib/pg.ts, `sessionActor`); a write outside any
+-- request — the bot, a migration — is recorded with no author, which is true.
+--
+-- What is kept is what changed, and never a secret: a password shows only as
+-- changed, and text longer than 2000 characters (a transcript, a file's
+-- extracted text) is cut to its opening, with its length — the row itself
+-- still holds it. A touch of `last_seen` alone is not a change anybody made.
+CREATE OR REPLACE FUNCTION audit_value(key TEXT, value JSONB) RETURNS JSONB AS $$
+  SELECT CASE
+    WHEN key = 'password_hash' THEN to_jsonb('***'::text)
+    WHEN jsonb_typeof(value) = 'string' AND length(value #>> '{}') > 2000
+      THEN to_jsonb(left(value #>> '{}', 200) || '… (' || length(value #>> '{}') || ')')
+    ELSE value
+  END;
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION audit_row() RETURNS trigger AS $$
+DECLARE
+  actor   INTEGER := NULLIF(current_setting('app.user_id', true), '')::INTEGER;
+  payload JSONB;
+  row_id  TEXT;
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    SELECT jsonb_object_agg(n.key, jsonb_build_object(
+             'from', audit_value(n.key, o.value), 'to', audit_value(n.key, n.value)))
+      INTO payload
+      FROM jsonb_each(to_jsonb(NEW)) n
+      JOIN jsonb_each(to_jsonb(OLD)) o ON o.key = n.key
+     WHERE n.value IS DISTINCT FROM o.value AND n.key NOT IN ('last_seen');
+    IF payload IS NULL THEN RETURN NULL; END IF;
+    row_id := to_jsonb(NEW) ->> 'id';
+  ELSIF TG_OP = 'INSERT' THEN
+    SELECT jsonb_object_agg(key, audit_value(key, value)) INTO payload
+      FROM jsonb_each(to_jsonb(NEW)) WHERE key NOT IN ('last_seen');
+    row_id := to_jsonb(NEW) ->> 'id';
+  ELSE
+    SELECT jsonb_object_agg(key, audit_value(key, value)) INTO payload
+      FROM jsonb_each(to_jsonb(OLD)) WHERE key NOT IN ('last_seen');
+    row_id := to_jsonb(OLD) ->> 'id';
+  END IF;
+  INSERT INTO audit_log (actor_id, action, entity, entity_id, detail)
+  VALUES (actor, TG_OP, TG_TABLE_NAME, row_id, payload);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- The Assembly's records and who may use them. Chat, notifications, the
+-- assistant's history and the agents' run logs are left out on purpose: they
+-- are either private conversation or a log of their own.
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'users', 'uyushmalar', 'klasterlar',
+    'loyihalar', 'project_members', 'project_threads', 'thread_entries',
+    'thread_members', 'project_stages', 'project_documents',
+    'meetings', 'meeting_projects', 'meeting_staff',
+    'kelishuvlar', 'kelishuv_parties', 'agreements',
+    'partners', 'contacts', 'partner_notes',
+    'tasks', 'task_stages', 'task_progress'
+  ] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS audit_on_write ON %I', t);
+    EXECUTE format(
+      'CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON %I '
+      'FOR EACH ROW EXECUTE FUNCTION audit_row()', t);
   END LOOP;
 END;
 $$;

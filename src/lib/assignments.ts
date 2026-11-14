@@ -1,8 +1,9 @@
 import { get, now, tx } from "@/lib/pg";
 import { publish } from "@/lib/events";
 import { notify } from "@/lib/notifications";
+import { priorityRefusal, priorityRoom } from "@/lib/priority-limits";
 import { assignableUsers } from "@/lib/queries";
-import type { User } from "@/lib/types";
+import type { Priority, User } from "@/lib/types";
 
 export interface AssignmentDraft {
   toUserId: number;
@@ -44,6 +45,14 @@ export async function createAssignment(
     throw new Error("Bu xodimga topshiriq berish huquqi yo'q");
   }
 
+  // The priority limits hold here too (TZ 3.5), for the same reason.
+  const refusal = priorityRefusal(
+    (draft.priority ?? "ORTA") as Priority,
+    await priorityRoom(author.id),
+  );
+  if (refusal === "KRITIK_LIMIT") throw new Error("Kritik topshiriqlar chegarasi to'lgan");
+  if (refusal === "YUQORI_LIMIT") throw new Error("«Yuqori» topshiriqlar ulushi chegarasi to'lgan");
+
   const seq =
     Number(
       (await get<{ c: number }>("SELECT COUNT(*) AS c FROM tasks"))?.c ?? 0,
@@ -59,10 +68,14 @@ export async function createAssignment(
     // RETURNING, not a lookup by `code` afterwards: code carries no unique
     // constraint, so that SELECT could hand back another writer's task.
     const newId = await q.insert(
+      // The kind follows the deadline (TZ 3.1): a meeting's next step or an
+      // AI draft with a date is deadline-bound work; without one it is
+      // open-ended and reported on weekly.
       `INSERT INTO tasks (code, title, description, from_user_id, to_user_id,
                           to_department, priority, status, deadline, uyushma_id, created_at,
-                          current_stage, stage_count, reviewer_user_id)
-       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,1,1,NULL)`,
+                          current_stage, stage_count, reviewer_user_id,
+                          kind, report_rhythm)
+       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,1,1,NULL,?,?)`,
       code,
       draft.title,
       draft.description ?? null,
@@ -73,6 +86,8 @@ export async function createAssignment(
       draft.deadline ?? null,
       assignee.uyushma_id ?? null,
       stamp,
+      draft.deadline ? "MUDDATLI" : "MUDDATSIZ",
+      draft.deadline ? null : "WEEKLY",
     );
 
     await q.run(

@@ -3,7 +3,8 @@ import { createAssignment } from "@/lib/assignments";
 import { companyById } from "@/lib/crm";
 import { LEGAL_STATUSES, meetingCode, type LegalStatus } from "@/lib/meetings";
 import { assignableUsers } from "@/lib/queries";
-import { receivesTasks, type User } from "@/lib/types";
+import { isExternal, receivesTasks, type User } from "@/lib/types";
+import { visibleProjectIds } from "@/lib/project-visibility";
 import { id as parseId, str } from "@/lib/validate";
 
 /** A meeting body, checked and normalised, ready to write. */
@@ -33,7 +34,7 @@ function idList(value: unknown, max: number): number[] {
 
 /** Which of `ids` exist in `table` — anything else was invented by the client. */
 async function existing(
-  table: "loyihalar" | "users",
+  table: "users",
   ids: number[],
   extra = "",
 ): Promise<number[]> {
@@ -70,11 +71,16 @@ export async function readMeetingInput(
   const title = str(body.title, 160);
   if (!title) return { ok: false, error: "TITLE_REQUIRED" };
 
-  const companyId = parseId(body.company_id);
+  // Someone outside the Assembly files a meeting for his own association and
+  // sees neither the companies base nor the staff list (TZ 4.3), so those
+  // fields are not his to fill: the association is his own, the rest blank.
+  const outside = isExternal(user.role);
+
+  const companyId = outside ? null : parseId(body.company_id);
   if (companyId && !(await companyById(companyId)))
     return { ok: false, error: "COMPANY_NOT_FOUND" };
 
-  const uyushmaId = parseId(body.uyushma_id);
+  const uyushmaId = outside ? user.uyushma_id : parseId(body.uyushma_id);
   if (
     uyushmaId &&
     !(await get("SELECT id FROM uyushmalar WHERE id = ?", uyushmaId))
@@ -119,12 +125,11 @@ export async function readMeetingInput(
       uyushma_id: uyushmaId,
       // Links to rows that do not exist are dropped rather than refused: a
       // project deleted while the form was open should not cost the meeting.
-      project_ids: await existing("loyihalar", idList(body.project_ids, 20)),
-      staff_ids: await existing(
-        "users",
-        idList(body.staff_ids, 40),
-        "AND is_active = 1",
-      ),
+      // So is a project the author cannot see (TZ 4.2).
+      project_ids: await visibleProjectIds(user, idList(body.project_ids, 20)),
+      staff_ids: outside
+        ? []
+        : await existing("users", idList(body.staff_ids, 40), "AND is_active = 1"),
     },
   };
 }

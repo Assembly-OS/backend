@@ -4,8 +4,16 @@ import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { notifyBot } from "@/lib/notify-bot";
 import { assignableUsers } from "@/lib/queries";
+import { priorityRefusal, priorityRoom } from "@/lib/priority-limits";
+import { attach, projectRights } from "@/lib/project-visibility";
 import { id, oneOf, str } from "@/lib/validate";
-import { PRIORITIES, TASK_SCOPES, type User } from "@/lib/types";
+import {
+  PRIORITIES,
+  REPORT_RHYTHMS,
+  TASK_KINDS,
+  TASK_SCOPES,
+  type User,
+} from "@/lib/types";
 
 /** Eight people is already an unusual chain; past that it is a process, not a
  *  task, and the form would be unreadable on a 360px screen. */
@@ -88,12 +96,41 @@ export async function POST(request: Request) {
     first.toUserId,
   ))!;
   const priority = oneOf(body.priority, PRIORITIES, "ORTA");
+  // TZ 3.5: the same rule the form uses to disable the options.
+  const refusal = priorityRefusal(priority, await priorityRoom(user.id));
+  if (refusal) return NextResponse.json({ error: refusal }, { status: 409 });
   // Weekly unless the author says otherwise: most assignments are errands,
   // and defaulting the other way would file every one of them under long work.
   const scope = oneOf(body.scope, TASK_SCOPES, "HAFTALIK");
   const description = str(body.description, 4000);
-  const deadline = str(body.deadline, 20);
+  const typedDeadline = str(body.deadline, 20);
   const loyihaId = body.loyihaId == null ? null : id(body.loyihaId);
+  // Work may only be filed under a project its author can see (TZ 4.2) —
+  // otherwise an id would attach people to a project nobody showed them.
+  if (loyihaId !== null && !(await projectRights(user, loyihaId)))
+    return NextResponse.json({ error: "BAD_PROJECT" }, { status: 400 });
+
+  // TZ block 3.1. A caller that does not send a kind — an older client, an
+  // integration — gets the one its deadline implies, so nothing that worked
+  // yesterday starts failing today.
+  const kind = oneOf(body.kind, TASK_KINDS, typedDeadline ? "MUDDATLI" : "MUDDATSIZ");
+  if (kind === "MUDDATLI" && !typedDeadline) {
+    return NextResponse.json({ error: "DEADLINE_REQUIRED" }, { status: 400 });
+  }
+  // Open-ended work carries no deadline at all: a date typed into the form
+  // before the author switched kind is dropped, not kept as a false one.
+  const deadline = kind === "MUDDATLI" ? typedDeadline : null;
+  const reportRhythm =
+    kind === "MUDDATSIZ" ? oneOf(body.reportRhythm, REPORT_RHYTHMS, "WEEKLY") : null;
+  const rawTarget =
+    body.targetValue === null || body.targetValue === undefined || body.targetValue === ""
+      ? null
+      : Number(String(body.targetValue).replace(",", "."));
+  const targetValue =
+    kind === "MUDDATSIZ" && rawTarget !== null && Number.isFinite(rawTarget) && rawTarget > 0
+      ? rawTarget
+      : null;
+  const targetUnit = targetValue !== null ? str(body.targetUnit, 40) : null;
 
   // `reviewNext` on the last stage is ignored — there is no next person, so
   // the author approves, as they always did.
@@ -116,8 +153,9 @@ export async function POST(request: Request) {
     const newId = await q.insert(
       `INSERT INTO tasks (code, title, description, from_user_id, to_user_id, to_department,
                           priority, status, deadline, loyiha_id, uyushma_id, scope, created_at,
-                          current_stage, stage_count, reviewer_user_id)
-       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,?,?,1,?,?)`,
+                          current_stage, stage_count, reviewer_user_id,
+                          kind, report_rhythm, target_value, target_unit)
+       VALUES (?,?,?,?,?,?,?,'YANGI',?,?,?,?,?,1,?,?,?,?,?,?)`,
       code,
       title,
       description,
@@ -132,6 +170,10 @@ export async function POST(request: Request) {
       stamp,
       chain.length,
       reviewerOf(0),
+      kind,
+      reportRhythm,
+      targetValue,
+      targetUnit,
     );
 
     for (let i = 0; i < chain.length; i++) {
@@ -159,6 +201,11 @@ export async function POST(request: Request) {
     return newId;
   });
 
+  // Work on a project attaches whoever it passes through, so they can open the
+  // project it belongs to (TZ 4.2).
+  if (loyihaId !== null)
+    for (const stage of chain) await attach(loyihaId, stage.toUserId, user.id);
+
   // The first assignee's inbox and counters, and everybody else's "coming to
   // you" list, refresh at once.
   publish(user.id, ...chain.map((stage) => stage.toUserId));
@@ -168,9 +215,7 @@ export async function POST(request: Request) {
   // arrives, because three messages at once would read as three assignments.
   notifyBot(
     first.toUserId,
-    `🔔 <b>Yangi topshiriq</b> ${code}\n${title}${
-      body.deadline ? `\n⏰ ${str(body.deadline, 20)}` : ""
-    }`,
+    `🔔 <b>Yangi topshiriq</b> ${code}\n${title}${deadline ? `\n⏰ ${deadline}` : ""}`,
   );
 
   return NextResponse.json({

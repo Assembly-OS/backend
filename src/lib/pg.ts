@@ -151,8 +151,69 @@ export function pool(): Pool {
   return g.__assambleyaPool;
 }
 
+/* ------------------------------------------------------------------ */
+/* Who is writing                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The signed-in person behind this request, for the audit trail (TZ 4.4).
+ *
+ * The database sees one pooled connection whoever asks, so the triggers that
+ * write the audit journal and the archive read the author from
+ * `app.user_id`. Rather than trust every route to say who it is acting for —
+ * the archive tried that with `actingAs`, and half the deletes went unnamed —
+ * the write path finds out itself, from the session cookie of the request it
+ * is running in. Outside a request (the bot's sweep, a migration, a script)
+ * there is no cookie, and the row is recorded as written by nobody, which is
+ * the truth.
+ *
+ * Imported lazily: this module is also loaded by the unit tests and by
+ * scripts, where neither Next's request context nor the auth module applies.
+ */
+async function sessionActor(): Promise<number | null> {
+  try {
+    const [{ cookies }, { readToken, SESSION_COOKIE }] = await Promise.all([
+      import("next/headers"),
+      import("./auth"),
+    ]);
+    const payload = readToken((await cookies()).get(SESSION_COOKIE)?.value);
+    return payload?.uid ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** A statement that changes rows; reads skip the attribution entirely. */
+const WRITE = /^\s*(insert|update|delete|with\b[\s\S]*\b(insert|update|delete)\b)/i;
+
+/**
+ * Runs one statement. A write inside a request runs in its own short
+ * transaction with `app.user_id` set, so the triggers can name its author;
+ * `set_config(…, true)` is local to that transaction and cannot leak onto
+ * the next borrower of the connection.
+ */
+async function query(sql: string, params: Param[]) {
+  const text = toPlaceholders(sql);
+  const actor = WRITE.test(sql) ? await sessionActor() : null;
+  if (actor === null) return await pool().query(text, params as unknown[]);
+
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.user_id', $1, true)", [String(actor)]);
+    const result = await client.query(text, params as unknown[]);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function all<T>(sql: string, ...params: Param[]): Promise<T[]> {
-  const result = await pool().query(toPlaceholders(sql), params as unknown[]);
+  const result = await query(sql, params);
   return result.rows as T[];
 }
 
@@ -165,7 +226,7 @@ export async function get<T>(
 }
 
 export async function run(sql: string, ...params: Param[]): Promise<void> {
-  await pool().query(toPlaceholders(sql), params as unknown[]);
+  await query(sql, params);
 }
 
 /**
@@ -177,7 +238,7 @@ export async function run(sql: string, ...params: Param[]): Promise<void> {
  */
 export async function insert(sql: string, ...params: Param[]): Promise<number> {
   const text = /returning/i.test(sql) ? sql : `${sql} RETURNING id`;
-  const result = await pool().query(toPlaceholders(text), params as unknown[]);
+  const result = await query(text, params);
   return Number(result.rows[0]?.id);
 }
 
@@ -204,9 +265,13 @@ export interface Tx {
  * and a defect that is rare and impossible to reproduce.
  */
 export async function tx<T>(fn: (q: Tx) => Promise<T>): Promise<T> {
+  const actor = await sessionActor();
   const client = await pool().connect();
   try {
     await client.query("BEGIN");
+    // The author, for the audit and archive triggers (see `sessionActor`).
+    if (actor !== null)
+      await client.query("SELECT set_config('app.user_id', $1, true)", [String(actor)]);
     const q: Tx = {
       async all<R>(sql: string, ...params: Param[]) {
         const result = await client.query(toPlaceholders(sql), params as unknown[]);

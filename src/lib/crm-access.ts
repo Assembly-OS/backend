@@ -1,5 +1,5 @@
 import { seesEverything } from "./oversight";
-import type { User } from "./types";
+import { isExternal, type User } from "./types";
 
 /**
  * Who may do what in the CRM.
@@ -16,33 +16,44 @@ import type { User } from "./types";
  *  - **Employee** — everyone else. Reads the directory and works their own
  *    agreements. They can close what they were made responsible for, which is
  *    the whole of their stake in it.
+ *  - **Outside** — people who work with the Assembly without working in it
+ *    (TZ 4.1). The companies and agreements base is closed to them (4.3).
  *
  * Read access is deliberately open to all staff: an internal directory nobody
  * can search is a directory nobody uses, and the sensitive material (chat,
  * salaries, the admin console) lives elsewhere behind its own checks.
  */
 
-export type CrmRole = "admin" | "manager" | "employee";
+export type CrmRole = "admin" | "manager" | "employee" | "outside";
 
-export function crmRole(user: User): CrmRole {
+/** All a CRM check needs to know about a person. */
+type CrmUser = Pick<User, "role" | "login">;
+
+export function crmRole(user: CrmUser): CrmRole {
   // The same chairman-and-assistant pair the rest of the platform uses; the
   // list of logins lives in lib/oversight.ts so there is only one of it.
   if (seesEverything(user)) return "admin";
-  if (user.role === "BOLIM_RAHBARI" || user.role === "LOYIHA_RAHBARI")
+  if (isExternal(user.role)) return "outside";
+  if (
+    user.role === "BOLIM_RAHBARI" ||
+    user.role === "LOYIHA_RAHBARI" ||
+    user.role === "KLASTER_RAHBARI"
+  )
     return "manager";
   return "employee";
 }
 
-/** Everyone signed in may read the directory. */
-export function canRead(): boolean {
-  return true;
+/** Every member of staff may read the directory; nobody outside it. */
+export function canRead(user: CrmUser): boolean {
+  return crmRole(user) !== "outside";
 }
 
-export function canWrite(user: User): boolean {
-  return crmRole(user) !== "employee";
+export function canWrite(user: CrmUser): boolean {
+  const role = crmRole(user);
+  return role === "admin" || role === "manager";
 }
 
-export function canDelete(user: User): boolean {
+export function canDelete(user: CrmUser): boolean {
   return crmRole(user) === "admin";
 }
 
@@ -50,6 +61,9 @@ export function canDelete(user: User): boolean {
  * Closing or reopening one agreement. Managers may settle anything; an
  * employee may settle what was put on them, and nothing else.
  */
-export function canSettle(user: User, ownerUserId: number | null): boolean {
+export function canSettle(
+  user: CrmUser & Pick<User, "id">,
+  ownerUserId: number | null,
+): boolean {
   return canWrite(user) || ownerUserId === user.id;
 }

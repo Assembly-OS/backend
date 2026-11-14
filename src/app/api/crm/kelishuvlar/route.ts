@@ -20,7 +20,10 @@ export async function POST(request: Request) {
   if (!canWrite(user))
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
-  const read = await readKelishuvInput((await request.json()) as Record<string, unknown>);
+  const read = await readKelishuvInput(
+    (await request.json()) as Record<string, unknown>,
+    user,
+  );
   if (!read.ok) return NextResponse.json({ error: read.error }, { status: 400 });
   const input = read.input;
 

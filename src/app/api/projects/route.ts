@@ -15,11 +15,11 @@ function isoDay(value: unknown): string | null {
   return day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
 }
 
-/** Every project, with the counts the list needs. Readable by all staff. */
+/** The projects this person can see (TZ 4.2), with the counts the list needs. */
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "AUTH" }, { status: 401 });
-  return NextResponse.json(await projectList());
+  return NextResponse.json(await projectList(user));
 }
 
 export async function POST(request: Request) {

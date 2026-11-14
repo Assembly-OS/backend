@@ -1,5 +1,6 @@
 import { all, get, now, run } from "./pg";
 import { notifyBot } from "./notify-bot";
+import { silentSince, silentSql } from "./metrics";
 
 /**
  * Notifications — the bell, and what rings it.
@@ -141,14 +142,18 @@ const LABELS: Record<string, { dueToday: string; dueSoon: string }> = {
   en: { dueToday: "Due today", dueSoon: "Deadline approaching" },
 };
 
-async function labelsFor(userId: number) {
+async function langOf(userId: number): Promise<string> {
   const lang = (
     await get<{ lang: string | null }>(
       "SELECT lang FROM users WHERE id = ?",
       userId,
     )
   )?.lang;
-  return LABELS[lang ?? "uz"] ?? LABELS.uz;
+  return lang ?? "uz";
+}
+
+async function labelsFor(userId: number) {
+  return LABELS[await langOf(userId)] ?? LABELS.uz;
 }
 
 interface DueRow {
@@ -209,6 +214,167 @@ export async function sweepReminders(): Promise<number> {
       push: true,
     });
     fired++;
+  }
+  return fired + (await sweepKelishuvTerms()) + (await sweepSilentTasks());
+}
+
+/* ------------------------------------------------------------------ */
+/* Open-ended work gone quiet                                          */
+/* ------------------------------------------------------------------ */
+
+const SILENT_LABELS: Record<string, string> = {
+  uz: "Topshiriq bo'yicha hisobot kelmadi",
+  uzc: "Топшириқ бўйича ҳисобот келмади",
+  ru: "По поручению нет отчёта",
+  en: "No report on an assignment",
+};
+
+/**
+ * Tells the person holding an open-ended assignment, and the person who handed
+ * it out, when it has gone quiet past its rhythm — TZ block 3.2: "vazifa «Jim»
+ * holatiga o'tadi va mas'ul hamda rahbarga bildirishnoma ketadi".
+ *
+ * Once per silence: the notice is keyed on the moment the report clock last
+ * restarted, so a report written today closes this silence, and only a new one
+ * after it can ring again.
+ */
+async function sweepSilentTasks(): Promise<number> {
+  const rows = await all<{
+    id: number;
+    code: string;
+    title: string;
+    from_user_id: number;
+    to_user_id: number;
+    since: string;
+  }>(
+    `SELECT id, code, title, from_user_id, to_user_id, (${silentSince()}) AS since
+       FROM tasks
+      WHERE ${silentSql()}
+      ORDER BY id
+      LIMIT 200`,
+  );
+
+  let fired = 0;
+  for (const row of rows) {
+    for (const userId of new Set([row.to_user_id, row.from_user_id])) {
+      const label = SILENT_LABELS[await langOf(userId)] ?? SILENT_LABELS.uz;
+      const sent = await notify({
+        userId,
+        kind: "task",
+        title: `${label} · ${row.code}`,
+        body: row.title,
+        href: userId === row.to_user_id ? "/tasks/execute" : "/tasks/assign",
+        entity: `task_silent:${row.since}`,
+        entityId: row.id,
+        push: true,
+      });
+      if (sent) fired++;
+    }
+  }
+  return fired;
+}
+
+/* ------------------------------------------------------------------ */
+/* Agreement terms                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Days before an agreement's term ends at which the person answering for it
+ * hears about it: a month to arrange a renewal, a week to chase it, and the
+ * day itself. TZ block 1.2: "muddat yaqinlashganda eslatma beriladi".
+ */
+const TERM_NOTICES = [30, 7, 0] as const;
+
+const TERM_LABELS: Record<string, { left: string; today: string }> = {
+  uz: { left: "Kelishuv muddati tugashiga {n} kun qoldi", today: "Kelishuv muddati bugun tugaydi" },
+  uzc: { left: "Келишув муддати тугашига {n} кун қолди", today: "Келишув муддати бугун тугайди" },
+  ru: { left: "Срок соглашения: осталось {n} дн.", today: "Срок соглашения истекает сегодня" },
+  en: { left: "Agreement term: {n} days left", today: "An agreement's term ends today" },
+};
+
+/**
+ * Today in Assembly time. The same rule as `today()` in crm.ts, repeated
+ * because crm.ts imports this module and the reverse import would be a cycle.
+ */
+function assemblyToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: process.env.NEXT_PUBLIC_TIME_ZONE || "Asia/Tashkent",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+const DAY_MS = 86_400_000;
+
+/** Calendar days from one 'YYYY-MM-DD' to another; NaN if either is malformed. */
+function daysBetween(from: string, to: string): number {
+  return Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS,
+  );
+}
+
+function addDays(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS)
+    .toISOString()
+    .slice(0, 10);
+}
+
+/**
+ * Warns whoever answers for an open agreement as its term runs out.
+ *
+ * Derived, like "expired" itself: nothing is scheduled when the agreement is
+ * saved, so a term that is extended, shortened or cleared needs no
+ * housekeeping. Each notice is keyed on the term date and the threshold, so
+ * the unique index lets every threshold fire once per term — and a renewed
+ * term, being a different date, starts again from the top.
+ *
+ * Only the tightest threshold crossed fires: an agreement entered with five
+ * days left gets the week's notice, not the month's and the week's at once.
+ * Nobody answering for it means the person who recorded it hears instead.
+ */
+async function sweepKelishuvTerms(): Promise<number> {
+  const day = assemblyToday();
+  const rows = await all<{
+    id: number;
+    title: string;
+    valid_until: string;
+    user_id: number;
+    parties: string | null;
+  }>(
+    `SELECT k.id, k.title, k.valid_until,
+            COALESCE(k.responsible_id, k.created_by) AS user_id,
+            (SELECT string_agg(p.name, ', ' ORDER BY p.name)
+               FROM kelishuv_parties kp JOIN partners p ON p.id = kp.company_id
+              WHERE kp.kelishuv_id = k.id) AS parties
+       FROM kelishuvlar k
+      WHERE k.status = 'OPEN'
+        AND k.valid_until >= ? AND k.valid_until <= ?
+        AND COALESCE(k.responsible_id, k.created_by) IS NOT NULL`,
+    day,
+    addDays(day, TERM_NOTICES[0]),
+  );
+
+  let fired = 0;
+  for (const row of rows) {
+    const left = daysBetween(day, row.valid_until);
+    // Ascending, so the first threshold at or above what is left is the
+    // tightest one crossed.
+    const threshold = [...TERM_NOTICES].reverse().find((n) => left <= n);
+    if (threshold === undefined) continue;
+
+    const labels = TERM_LABELS[await langOf(row.user_id)] ?? TERM_LABELS.uz;
+    const sent = await notify({
+      userId: row.user_id,
+      kind: "agreement",
+      title: threshold === 0 ? labels.today : labels.left.replace("{n}", String(left)),
+      body: [row.title, row.parties].filter(Boolean).join(" — "),
+      href: `/agreements/${row.id}`,
+      entity: `kelishuv_term:${row.valid_until}:${threshold}`,
+      entityId: row.id,
+      push: true,
+    });
+    if (sent) fired++;
   }
   return fired;
 }
