@@ -141,6 +141,8 @@ export function hrefFor(
       return source.project_id ? `/projects/${source.project_id}` : "/projects";
     case "library":
       return `/knowledge/${source.ref_id}`;
+    case "partner":
+      return `/companies/${source.ref_id}`;
     case "uyushma":
       return `/associations/${source.ref_id}`;
     case "kelishuv":

@@ -1665,3 +1665,47 @@ BEGIN
   END LOOP;
 END;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- TZ block 8: decision points, review cadence, cached reports.
+-- ---------------------------------------------------------------------------
+
+-- 8.3: a project changes phase only through a decision — continue, rework or
+-- stop — taken by a named person and written down. The row keeps both ends
+-- of the move so the life cycle can be read back as a list of decisions.
+CREATE TABLE IF NOT EXISTS project_decisions (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project_id  INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  phase_from  TEXT,
+  phase_to    TEXT,
+  -- CONTINUE | REWORK | STOP
+  outcome     TEXT NOT NULL,
+  note        TEXT,
+  decided_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_project_decisions_project ON project_decisions(project_id, id DESC);
+
+-- 8.2: when the project was last looked at by its tier's rhythm — a decision,
+-- or a review that changed nothing. The next review is computed from it.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS last_reviewed_at TEXT;
+
+-- 8.5: reports computed in the background, read at request time.
+CREATE TABLE IF NOT EXISTS report_cache (
+  key         TEXT PRIMARY KEY,
+  value       JSONB NOT NULL,
+  computed_at TEXT NOT NULL
+);
+
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['project_decisions'] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
+    EXECUTE format('CREATE TRIGGER archive_on_delete BEFORE DELETE ON %I FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()', t);
+    EXECUTE format('DROP TRIGGER IF EXISTS audit_on_write ON %I', t);
+    EXECUTE format('CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION audit_row()', t);
+  END LOOP;
+END;
+$$;

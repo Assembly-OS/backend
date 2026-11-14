@@ -141,13 +141,19 @@ export interface CompanyRow extends Company {
   projects: number;
 }
 
-/** The list view: every company with the counts that make the row useful. */
-export async function companies(filter?: {
+export interface CompanyFilter {
   status?: string;
   stage?: string;
   uyushmaId?: number | null;
   query?: string;
-}): Promise<CompanyRow[]> {
+  /** Only companies past their stage's limit, judged in SQL from these limits. */
+  stuckLimits?: Record<Stage, number> | null;
+}
+
+export const COMPANY_PAGE = 30;
+
+/** The WHERE of the directory, shared by the list and its count. */
+function companyWhere(filter?: CompanyFilter): { sql: string; params: (string | number)[] } {
   const where: string[] = [];
   const params: (string | number)[] = [];
 
@@ -174,7 +180,24 @@ export async function companies(filter?: {
     const like = `%${filter.query}%`;
     params.push(like, like, like, like, like);
   }
+  if (filter?.stuckLimits) {
+    // A stay past its limit, stage by stage; stages with no limit never count.
+    const cutoffs = (Object.entries(filter.stuckLimits) as [Stage, number][])
+      .filter(([, days]) => days > 0)
+      .map(([stage, days]) => {
+        params.push(stage, new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 19).replace("T", " "));
+        return "(p.stage = ? AND p.stage_since < ?)";
+      });
+    where.push(cutoffs.length ? `(${cutoffs.join(" OR ")})` : "FALSE");
+  }
+  return { sql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
+}
 
+/** The list view: every company with the counts that make the row useful. */
+export async function companies(filter?: CompanyFilter & { page?: number; pageSize?: number }): Promise<CompanyRow[]> {
+  const { sql, params } = companyWhere(filter);
+  const size = filter?.pageSize ?? 300;
+  const page = Math.max(1, filter?.page ?? 1);
   return await all<CompanyRow>(
     `SELECT p.*,
             u.full_name AS owner_name,
@@ -188,17 +211,41 @@ export async function companies(filter?: {
        FROM partners p
        LEFT JOIN users u ON u.id = p.owner_user_id
        LEFT JOIN uyushmalar y ON y.id = p.uyushma_id
-      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ${sql}
       ORDER BY COALESCE(p.last_contact_at, p.last_seen, p.created_at) DESC
-      LIMIT 300`,
+      LIMIT ? OFFSET ?`,
     ...params,
+    size,
+    (page - 1) * size,
   );
+}
+
+/** How many companies the filter matches, for the pager and the "stuck" chip. */
+export async function companyCount(filter?: CompanyFilter): Promise<number> {
+  const { sql, params } = companyWhere(filter);
+  const row = await get<{ n: string }>(`SELECT COUNT(*) AS n FROM partners p ${sql}`, ...params);
+  return Number(row?.n ?? 0);
 }
 
 export async function companyById(
   id: number,
 ): Promise<CompanyRow | undefined> {
-  return (await companies()).find((company) => company.id === id);
+  return await get<CompanyRow>(
+    `SELECT p.*,
+            u.full_name AS owner_name,
+            y.name AS uyushma_name,
+            (SELECT COUNT(*) FROM meetings m WHERE m.company_id = p.id) AS meetings,
+            (SELECT COUNT(DISTINCT pt.project_id) FROM project_threads pt WHERE pt.company_id = p.id) AS projects,
+            (SELECT COUNT(*) FROM agreements a WHERE a.company_id = p.id) AS agreements,
+            (SELECT COUNT(*) FROM agreements a
+              WHERE a.company_id = p.id AND a.status IN ('NEW','IN_PROGRESS')) AS open_agreements,
+            (SELECT COUNT(*) FROM contacts c WHERE c.company_id = p.id) AS contacts
+       FROM partners p
+       LEFT JOIN users u ON u.id = p.owner_user_id
+       LEFT JOIN uyushmalar y ON y.id = p.uyushma_id
+      WHERE p.id = ?`,
+    id,
+  );
 }
 
 const COMPANY_FIELDS = [
@@ -254,6 +301,7 @@ export async function createCompany(input: CompanyInput): Promise<number> {
     input.owner_user_id ?? null,
     now(),
   );
+  void remember("partner", id);
   return id;
 }
 
@@ -306,6 +354,7 @@ export async function moveStage(
       now(),
     );
   });
+  void remember("partner", partnerId);
   return true;
 }
 
@@ -346,8 +395,8 @@ export async function funnel(): Promise<Record<Stage, number>> {
 
 /** Companies past their stage's limit, with their owner, for the sweep and the card. */
 export async function stuckCompanies(limits: Record<Stage, number>): Promise<(CompanyRow & { days: number })[]> {
-  const rows = await companies();
   const today = new Date();
+  const rows = await companies({ stuckLimits: limits, pageSize: 500 });
   return rows
     .filter((row) => isStuck(row.stage, row.stage_since, limits, today))
     .map((row) => ({ ...row, days: daysIn(row.stage_since, today) ?? 0 }));
@@ -386,6 +435,7 @@ export async function updateCompany(
     now(),
     id,
   );
+  void remember("partner", id);
 }
 
 /** Called whenever a meeting is filed, so the card's dates stay honest. */
@@ -477,6 +527,7 @@ export async function createContact(input: ContactInput): Promise<number> {
       input.company_id,
     );
   }
+  void remember("partner", input.company_id);
   return id;
 }
 
@@ -484,10 +535,12 @@ export async function deleteContact(
   id: number,
   byUserId: number,
 ): Promise<void> {
+  const contact = await get<{ company_id: number }>("SELECT company_id FROM contacts WHERE id = ?", id);
   await tx(async (q) => {
     await actingAs(q, byUserId);
     await q.run("DELETE FROM contacts WHERE id = ?", id);
   });
+  if (contact) void remember("partner", contact.company_id);
 }
 
 /* ------------------------------------------------------------------ */

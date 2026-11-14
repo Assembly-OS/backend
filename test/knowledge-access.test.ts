@@ -65,7 +65,8 @@ test("an employee is scoped to involvement and visible projects", () => {
   assert.ok(scope.sql.includes("t.to_user_id = 7"));
   assert.ok(scope.sql.includes("s.kind = 'thread_entry' AND EXISTS (SELECT 1 FROM loyihalar l"));
   assert.ok(scope.sql.includes("s.kind = 'meeting' AND EXISTS (SELECT 1 FROM meetings m"));
-  assert.ok(scope.sql.includes("s.kind IN ('kelishuv', 'agreement')"));
+  // The companies base is the staff's (TZ 4.3): its cards read with the agreements.
+  assert.ok(scope.sql.includes("s.kind IN ('kelishuv', 'agreement', 'partner')"));
   assert.ok(scope.sql.includes("d.visibility = 'DEPARTMENT' AND d.department = ?"));
   assert.ok(scope.params.includes("GR"));
 });

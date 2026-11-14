@@ -114,7 +114,7 @@ export function visibleSourcesSql(
   }
 
   // Agreements and commitments: the companies base is the staff's (TZ 4.3).
-  if (global || canRead(user)) parts.push(`${alias}.kind IN ('kelishuv', 'agreement')`);
+  if (global || canRead(user)) parts.push(`${alias}.kind IN ('kelishuv', 'agreement', 'partner')`);
 
   // An association's card: the staff read all, an association's own people
   // theirs (TZ 4.2, 6.1 "bir uyushmaning yozuvini boshqasi ko'ra olmaydi").

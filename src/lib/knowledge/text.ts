@@ -26,6 +26,7 @@ export const SOURCE_KINDS = [
   "agreement",
   "project",
   "uyushma",
+  "partner",
 ] as const;
 export type SourceKind = (typeof SOURCE_KINDS)[number];
 
@@ -46,6 +47,7 @@ export const RELIABILITY: Record<SourceKind, number> = {
   task: 1,
   project: 0.95,
   uyushma: 0.95,
+  partner: 0.9,
   kelishuv: 0.95,
   agreement: 0.9,
   meeting: 0.85,

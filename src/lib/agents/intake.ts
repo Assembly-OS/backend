@@ -34,8 +34,67 @@ export interface DraftTask {
   rationale: string;
 }
 
-export interface DocumentAnalysis {
+/** An agreement's card as a draft (TZ 7.2 "Imzolangan hujjat → kelishuv kartasi"). */
+export interface KelishuvDraft {
+  title: string;
+  kind: "MOU" | "LOI" | "TERM_SHEET" | "CONTRACT" | "PROTOCOL" | "OTHER";
+  content: string;
+  /** Company names as the document writes them; matched to the base later. */
+  parties: string[];
+  amount: number;
+  currency: "UZS" | "USD" | "EUR" | "";
+  signed_on: string;
+  valid_until: string;
+  obligations: { description: string; owner: string; deadline: string }[];
+  rationale: string;
+}
+
+/** A company the source names that the base does not hold yet. */
+export interface CompanyDraft {
+  name: string;
+  industry: string;
+  description: string;
+  head_name: string;
+  head_position: string;
+  country: string;
+  city: string;
+  website: string;
+  rationale: string;
+}
+
+/** A company's move along the partnership path the source justifies. */
+export interface StageDraft {
+  company: string;
+  stage: "NEW_CONTACT" | "CONTACT" | "MEETING" | "PROPOSAL" | "NEGOTIATION" | "AGREEMENT" | "ACTIVE" | "MONITORING" | "CLOSED";
+  rationale: string;
+}
+
+/** A project's phase a report says it has reached. */
+export interface PhaseDraft {
+  project: string;
+  phase: "CONCEPT" | "FEASIBILITY" | "PREPARATION" | "EXECUTION" | "MONITORING" | "CLOSED" | "FROZEN";
+  rationale: string;
+}
+
+export interface RecordDrafts {
+  kelishuvlar: KelishuvDraft[];
+  companies: CompanyDraft[];
+  stageUpdates: StageDraft[];
+  phaseUpdates: PhaseDraft[];
+}
+
+/** What the base already holds, so drafts name real companies and projects. */
+export interface IntakeContext {
+  companies: { id: number; name: string; stage: string }[];
+  projects: { id: number; code: string; name: string; phase: string | null }[];
+}
+
+export const DOCUMENT_KINDS = ["ORDER", "LETTER", "SIGNED", "REPORT", "OTHER"] as const;
+
+export interface DocumentAnalysis extends RecordDrafts {
   documentTitle: string;
+  /** What the document is: an order or minutes, a letter or proposal, a signed agreement, a project report. */
+  kind: (typeof DOCUMENT_KINDS)[number];
   summary: string;
   tasks: DraftTask[];
   model: string;
@@ -74,6 +133,10 @@ export interface MeetingAnalysis {
   memory: MemoryFact[];
   /** The companies this meeting was about, and what to propose them next. */
   partners: PartnerReport[];
+  /** An agreement drafted from what was agreed, when something was (TZ 7.2). */
+  kelishuvlar: KelishuvDraft[];
+  /** Companies met that the base does not hold yet. */
+  companies: CompanyDraft[];
   model: string;
   tokensIn: number;
   tokensOut: number;
@@ -108,16 +171,122 @@ const TASK_ITEM = {
   additionalProperties: false,
 } as const;
 
+const KELISHUV_ITEM = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    kind: { type: "string", enum: ["MOU", "LOI", "TERM_SHEET", "CONTRACT", "PROTOCOL", "OTHER"] },
+    content: { type: "string", description: "the substance, in Uzbek (latin)" },
+    parties: { type: "array", items: { type: "string" }, description: "company names as written" },
+    amount: { type: "number", description: "0 when none" },
+    currency: { type: "string", enum: ["UZS", "USD", "EUR", ""] },
+    signed_on: { type: "string", description: "YYYY-MM-DD or empty" },
+    valid_until: { type: "string", description: "YYYY-MM-DD or empty" },
+    obligations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          description: { type: "string" },
+          owner: { type: "string", description: "login from the staff list, or empty" },
+          deadline: { type: "string", description: "YYYY-MM-DD or empty" },
+        },
+        required: ["description", "owner", "deadline"],
+        additionalProperties: false,
+      },
+    },
+    rationale: { type: "string" },
+  },
+  required: ["title", "kind", "content", "parties", "amount", "currency", "signed_on", "valid_until", "obligations", "rationale"],
+  additionalProperties: false,
+} as const;
+
+const COMPANY_ITEM = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    industry: { type: "string" },
+    description: { type: "string" },
+    head_name: { type: "string" },
+    head_position: { type: "string" },
+    country: { type: "string" },
+    city: { type: "string" },
+    website: { type: "string" },
+    rationale: { type: "string" },
+  },
+  required: ["name", "industry", "description", "head_name", "head_position", "country", "city", "website", "rationale"],
+  additionalProperties: false,
+} as const;
+
+const STAGE_ITEM = {
+  type: "object",
+  properties: {
+    company: { type: "string", description: "a company name from the supplied base" },
+    stage: {
+      type: "string",
+      enum: ["NEW_CONTACT", "CONTACT", "MEETING", "PROPOSAL", "NEGOTIATION", "AGREEMENT", "ACTIVE", "MONITORING", "CLOSED"],
+    },
+    rationale: { type: "string" },
+  },
+  required: ["company", "stage", "rationale"],
+  additionalProperties: false,
+} as const;
+
+const PHASE_ITEM = {
+  type: "object",
+  properties: {
+    project: { type: "string", description: "a project code from the supplied list" },
+    phase: { type: "string", enum: ["CONCEPT", "FEASIBILITY", "PREPARATION", "EXECUTION", "MONITORING", "CLOSED", "FROZEN"] },
+    rationale: { type: "string" },
+  },
+  required: ["project", "phase", "rationale"],
+  additionalProperties: false,
+} as const;
+
 const DOCUMENT_SCHEMA = {
   type: "object",
   properties: {
     documentTitle: { type: "string" },
+    kind: { type: "string", enum: ["ORDER", "LETTER", "SIGNED", "REPORT", "OTHER"] },
     summary: { type: "string" },
     tasks: { type: "array", items: TASK_ITEM },
+    kelishuvlar: { type: "array", items: KELISHUV_ITEM },
+    companies: { type: "array", items: COMPANY_ITEM },
+    stageUpdates: { type: "array", items: STAGE_ITEM },
+    phaseUpdates: { type: "array", items: PHASE_ITEM },
   },
-  required: ["documentTitle", "summary", "tasks"],
+  required: ["documentTitle", "kind", "summary", "tasks", "kelishuvlar", "companies", "stageUpdates", "phaseUpdates"],
   additionalProperties: false,
 } as const;
+
+/** The base as prompt text, so drafts name what exists and nothing else. */
+function baseBlock(context: IntakeContext | undefined): string {
+  if (!context) return "";
+  const companies = context.companies.slice(0, 300).map((c) => `- ${c.name} (${c.stage})`).join("\n");
+  const projects = context.projects
+    .slice(0, 150)
+    .map((p) => `- ${p.code} — ${p.name}${p.phase ? ` (${p.phase})` : ""}`)
+    .join("\n");
+  return (
+    (companies ? `\n\nBazadagi kompaniyalar (nomi va hamkorlik bosqichi):\n${companies}` : "") +
+    (projects ? `\n\nLoyihalar (kodi, nomi, bosqichi):\n${projects}` : "")
+  );
+}
+
+const RECORD_RULES =
+  "\n\nRecords, besides tasks (TZ 7.2). `kind` says what the document is. " +
+  "A signed agreement (memorandum, letter of intent, term sheet, contract, " +
+  "protocol) fills `kelishuvlar` with its card: parties as written, substance, " +
+  "amount and currency, dates, obligations with an owner login where the " +
+  "text names one. A letter or proposal names in `companies` any company it " +
+  "is from or about that the supplied base does not hold, and in " +
+  "`stageUpdates` a move along the partnership path that the text itself " +
+  "justifies — a proposal received is PROPOSAL, a negotiation under way is " +
+  "NEGOTIATION — naming the company exactly as the base writes it. A project " +
+  "report fills `phaseUpdates` with the phase the report says the project " +
+  "has reached, by project code. Every one of these is a proposal a person " +
+  "will confirm; propose only what the document states, and leave a list " +
+  "empty rather than guess.";
 
 const TEXT3 = {
   type: "object",
@@ -196,8 +365,10 @@ const MEETING_SCHEMA = {
     tasks: { type: "array", items: TASK_ITEM },
     memory: { type: "array", items: MEMORY_ITEM },
     partners: { type: "array", items: PARTNER_ITEM },
+    kelishuvlar: { type: "array", items: KELISHUV_ITEM },
+    companies: { type: "array", items: COMPANY_ITEM },
   },
-  required: ["summary", "keyPoints", "decisions", "tasks", "memory", "partners"],
+  required: ["summary", "keyPoints", "decisions", "tasks", "memory", "partners", "kelishuvlar", "companies"],
   additionalProperties: false,
 } as const;
 
@@ -288,6 +459,7 @@ export async function analyzeDocument(
   fileName: string,
   candidates: Candidate[],
   budgetTokens: number,
+  context?: IntakeContext,
 ): Promise<DocumentAnalysis | null> {
   if (!isConfigured() || candidates.length === 0) return null;
   const client = new Anthropic();
@@ -307,8 +479,10 @@ export async function analyzeDocument(
       },
       system:
         "You process incoming documents for the Uzbekistan Economy Assembly " +
-        "and turn them into assignments for named staff.\n\n" +
-        RULES,
+        "and turn them into assignments for named staff, and into the records " +
+        "the document carries.\n\n" +
+        RULES +
+        RECORD_RULES,
       messages: [
         {
           role: "user",
@@ -317,9 +491,11 @@ export async function analyzeDocument(
             {
               type: "text",
               text:
-                `Hujjat: ${fileName} (${source.label})\n\nMas'ul etib tayinlash mumkin bo'lgan xodimlar:\n${roster(candidates)}\n\n` +
-                "Hujjatni o'qing, undagi topshiriqlarni ajratib oling va har birini " +
-                "ro'yxatdagi eng mos xodimga taqsimlang.",
+                `Hujjat: ${fileName} (${source.label})\n\nMas'ul etib tayinlash mumkin bo'lgan xodimlar:\n${roster(candidates)}` +
+                baseBlock(context) +
+                "\n\nHujjatni o'qing, undagi topshiriqlarni ajratib oling va har birini " +
+                "ro'yxatdagi eng mos xodimga taqsimlang. Hujjat turini aniqlang va " +
+                "undagi yozuvlarni (kelishuv, kompaniya, bosqich, loyiha fazasi) qoralama sifatida bering.",
             },
           ],
         },
@@ -337,7 +513,12 @@ export async function analyzeDocument(
 
     return {
       ...parsed,
+      kind: DOCUMENT_KINDS.includes(parsed.kind) ? parsed.kind : "OTHER",
       tasks: parsed.tasks ?? [],
+      kelishuvlar: parsed.kelishuvlar ?? [],
+      companies: parsed.companies ?? [],
+      stageUpdates: parsed.stageUpdates ?? [],
+      phaseUpdates: parsed.phaseUpdates ?? [],
       model: response.model,
       tokensIn: response.usage.input_tokens,
       tokensOut: response.usage.output_tokens,
@@ -355,6 +536,7 @@ export async function analyzeMeeting(
   budgetTokens: number,
   lang = "uz-UZ",
   facts: MemoryFact[] = [],
+  context?: IntakeContext,
 ): Promise<MeetingAnalysis | null> {
   if (!isConfigured() || !transcript.trim()) return null;
   const client = new Anthropic();
@@ -409,12 +591,17 @@ export async function analyzeMeeting(
         "history actually supports; an invented opportunity costs a real " +
         "meeting. Leave `match` empty when the idea involves no second company, " +
         "and return an empty list when nothing is worth proposing.\n\n" +
+        "`kelishuvlar` holds an agreement's card only when the meeting " +
+        "actually reached one — parties, substance, amount, dates, " +
+        "obligations; `companies` the organisations met that the supplied " +
+        "base does not hold. Both are drafts a person confirms (TZ 7.2).\n\n" +
         RULES,
       messages: [
         {
           role: "user",
           content:
             `Uchrashuv: ${title}\n\nXodimlar:\n${roster(candidates)}` +
+            baseBlock(context) +
             memoryBlock(facts) +
             (await partnerHistory()) +
             `\n\nBayonnoma (avtomatik tanilgan matn):\n"""\n${transcript.slice(0, 60_000)}\n"""`,
@@ -438,6 +625,8 @@ export async function analyzeMeeting(
       tasks: parsed.tasks ?? [],
       memory: parsed.memory ?? [],
       partners: parsed.partners ?? [],
+      kelishuvlar: parsed.kelishuvlar ?? [],
+      companies: parsed.companies ?? [],
       model: response.model,
       tokensIn: response.usage.input_tokens,
       tokensOut: response.usage.output_tokens,

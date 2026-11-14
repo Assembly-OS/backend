@@ -1,4 +1,4 @@
-import { all, get, now } from "./pg";
+import { all, get, now, run } from "./pg";
 import type { Role } from "./types";
 
 /**
@@ -130,6 +130,8 @@ export interface WeeklyReport {
   week: WeekBounds;
   rows: WeeklyRow[];
   totals: WeeklyTotals;
+  /** When a cached copy was computed; absent when computed for this request. */
+  computedAt?: string;
 }
 
 /**
@@ -304,4 +306,67 @@ export function renderWeeklyText(
 
   if (platformUrl) lines.push("", `${platformUrl}/reports`);
   return lines.join("\n");
+}
+
+/* ------------------------------------------------------------------ */
+/* The cache (TZ 8.5: reports are computed in the background)          */
+/* ------------------------------------------------------------------ */
+
+const FRESH_MINUTES = 60;
+const REFRESH_MINUTES = 15;
+
+function cacheKey(period: "week" | "month", offset: number): string {
+  return `weekly:${period}:${offset}`;
+}
+
+async function cached(key: string): Promise<{ value: WeeklyReport; computed_at: string } | undefined> {
+  return await get<{ value: WeeklyReport; computed_at: string }>(
+    "SELECT value, computed_at FROM report_cache WHERE key = ?",
+    key,
+  );
+}
+
+async function store(key: string, value: WeeklyReport): Promise<void> {
+  await run(
+    `INSERT INTO report_cache (key, value, computed_at) VALUES (?, ?::jsonb, ?)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, computed_at = EXCLUDED.computed_at`,
+    key,
+    JSON.stringify(value),
+    now(),
+  );
+}
+
+function ageMinutes(stamp: string): number {
+  return (Date.now() - Date.parse(`${stamp.replace(" ", "T")}Z`)) / 60_000;
+}
+
+/**
+ * The report as the page reads it: the background copy when it is fresh,
+ * otherwise computed now and kept for the next reader. A past period never
+ * changes, so its copy is good for as long as it exists.
+ */
+export async function cachedWeeklyReport(offset = 0, period: "week" | "month" = "week"): Promise<WeeklyReport> {
+  const key = cacheKey(period, offset);
+  const hit = await cached(key);
+  if (hit && (offset < 0 || ageMinutes(hit.computed_at) < FRESH_MINUTES))
+    return { ...hit.value, computedAt: hit.computed_at };
+  const report = await weeklyReport(offset, period);
+  await store(key, report);
+  return report;
+}
+
+/**
+ * Called by the sweep: recomputes the current week and month when their
+ * copies are older than a quarter of an hour. Returns how many it refreshed.
+ */
+export async function refreshReportCache(): Promise<number> {
+  let refreshed = 0;
+  for (const period of ["week", "month"] as const) {
+    const key = cacheKey(period, 0);
+    const hit = await cached(key);
+    if (hit && ageMinutes(hit.computed_at) < REFRESH_MINUTES) continue;
+    await store(key, await weeklyReport(0, period));
+    refreshed++;
+  }
+  return refreshed;
 }

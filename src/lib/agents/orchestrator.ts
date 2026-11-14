@@ -367,6 +367,11 @@ export async function decideProposal(
       });
       const touched = edits && Object.keys(edits).length > 0;
       result = `topshiriq yaratildi: ${code}${touched ? " (tahrirlangan)" : ""}`;
+    } else if (proposal.action === "suggest_record") {
+      // TZ 7.2: an agreement, a company, a stage or a phase, drafted from a
+      // document or a meeting and confirmed here.
+      const { executeRecord } = await import("./records");
+      result = await executeRecord(payload as unknown as import("./records").RecordPayload, decidedBy, proposal.owner_user_id);
     } else if (proposal.action === "notify" || proposal.action === "escalate") {
       // The one outward-facing effect the platform has today: a Telegram
       // message through the bot. Silently a no-op when the person has not
@@ -509,4 +514,116 @@ export async function proposals(
         "SELECT * FROM agent_proposals ORDER BY id DESC LIMIT ?",
         limit,
       );
+}
+
+/* ------------------------------------------------------------------ */
+/* The queue (TZ 7.1)                                                  */
+/* ------------------------------------------------------------------ */
+
+export const PROPOSAL_PAGE = 30;
+
+export interface ProposalFilter {
+  status?: string | null;
+  severity?: string | null;
+  /** The person the draft is for (`subject_kind = 'user'`). */
+  assigneeId?: number | null;
+  agent?: string | null;
+  /** YYYY-MM-DD, inclusive, on the day the proposal was filed. */
+  from?: string | null;
+  to?: string | null;
+  page?: number;
+}
+
+export interface ProposalPage {
+  rows: ProposalView[];
+  total: number;
+  page: number;
+  pages: number;
+}
+
+/**
+ * A reviewer's queue with the filters of TZ 7.1 — status, importance, the
+ * person it is for, the agent, the date — and server-side pages: twenty
+ * projects produced twenty-three proposals, a hundred will produce more
+ * than a screen holds.
+ */
+export async function proposalsFor(reviewerId: number, filter: ProposalFilter = {}): Promise<ProposalPage> {
+  const where = ["(reviewer_user_id = ? OR (reviewer_user_id IS NULL AND owner_user_id = ?))"];
+  const params: (string | number)[] = [reviewerId, reviewerId];
+  if (filter.status) {
+    where.push("status = ?");
+    params.push(filter.status);
+  }
+  if (filter.severity) {
+    where.push("severity = ?");
+    params.push(filter.severity);
+  }
+  if (filter.assigneeId) {
+    where.push("subject_kind = 'user' AND subject_id = ?");
+    params.push(filter.assigneeId);
+  }
+  if (filter.agent) {
+    where.push("agent = ?");
+    params.push(filter.agent);
+  }
+  if (filter.from) {
+    where.push("created_at >= ?");
+    params.push(filter.from);
+  }
+  if (filter.to) {
+    where.push("created_at < ?");
+    params.push(`${filter.to} 23:59:59z`);
+  }
+  const sql = where.join(" AND ");
+  const count = await get<{ n: string }>(`SELECT COUNT(*) AS n FROM agent_proposals WHERE ${sql}`, ...params);
+  const total = Number(count?.n ?? 0);
+  const pages = Math.max(1, Math.ceil(total / PROPOSAL_PAGE));
+  const page = Math.min(Math.max(1, filter.page ?? 1), pages);
+  const rows = await all<ProposalView>(
+    `SELECT * FROM agent_proposals WHERE ${sql} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    ...params,
+    PROPOSAL_PAGE,
+    (page - 1) * PROPOSAL_PAGE,
+  );
+  return { rows, total, page, pages };
+}
+
+/**
+ * Several proposals decided at once ("ommaviy tasdiqlash"). Each is checked
+ * on its own — the reviewer must be its reviewer, it must still be pending
+ * — and each outcome is reported, so one refusal does not hide the rest.
+ */
+export async function decideMany(
+  ids: number[],
+  decision: "approve" | "reject",
+  user: { id: number; login: string },
+): Promise<{ id: number; ok: boolean; error?: string; result?: string }[]> {
+  const out: { id: number; ok: boolean; error?: string; result?: string }[] = [];
+  for (const id of ids.slice(0, 100)) {
+    const proposal = await proposalById(id);
+    if (!proposal || !mayDecide(proposal, user.id)) {
+      out.push({ id, ok: false, error: "NOT_FOUND" });
+      continue;
+    }
+    const outcome = await decideProposal(id, decision, user.login);
+    out.push({ id, ...outcome });
+  }
+  return out;
+}
+
+/**
+ * A proposal nobody looked at for `days` is archived as expired (TZ 7.1
+ * "eskirish"): the document it came from is still there, the queue is not
+ * a graveyard. Returns how many were archived.
+ */
+export async function expireProposals(days: number): Promise<number> {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+  const rows = await all<{ id: number }>(
+    `UPDATE agent_proposals SET status = 'expired', decided_by = 'system', decided_at = ?, result = ?
+      WHERE status = 'pending' AND created_at < ? RETURNING id`,
+    now(),
+    `${days} kun ko'rilmadi`,
+    cutoff,
+  );
+  return rows.length;
 }

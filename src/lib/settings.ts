@@ -1,6 +1,14 @@
 import { get, now, run } from "./pg";
 import { mergeSettings, type KpiSettings } from "./kpi-rules";
 import { mergeStageLimits, type Stage } from "./crm-stages";
+import {
+  mergeAiSettings,
+  mergeSignalSettings,
+  mergeTierSettings,
+  type AiSettings,
+  type SignalSettings,
+  type TierSettings,
+} from "./signal-rules";
 
 /**
  * Settings the chairman changes without a deployment: one row per key,
@@ -49,4 +57,23 @@ export const CRM_SETTINGS_KEY = "crm";
 export async function stageLimits(): Promise<Record<Stage, number>> {
   const stored = await readSetting<{ stageLimits?: unknown }>(CRM_SETTINGS_KEY);
   return mergeStageLimits(stored?.stageLimits);
+}
+
+export const TIER_SETTINGS_KEY = "tiers";
+export const SIGNAL_SETTINGS_KEY = "signals";
+export const AI_SETTINGS_KEY = "ai";
+
+/** Review rhythm and red-share limit per tier (TZ 8.2). */
+export async function tierSettings(): Promise<TierSettings> {
+  return mergeTierSettings(await readSetting(TIER_SETTINGS_KEY));
+}
+
+/** The six signals' thresholds (TZ 7.5). */
+export async function signalSettings(): Promise<SignalSettings> {
+  return mergeSignalSettings(await readSetting(SIGNAL_SETTINGS_KEY));
+}
+
+/** The AI queue's switches: auto-approval and expiry (TZ 7.1). */
+export async function aiSettings(): Promise<AiSettings> {
+  return mergeAiSettings(await readSetting(AI_SETTINGS_KEY));
 }
