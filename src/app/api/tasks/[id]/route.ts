@@ -8,6 +8,7 @@ import { authorizeTransition, missingText, STAGE_STARTED } from "@/lib/task-mach
 import { MAX_BYTES, safeName, store } from "@/lib/uploads";
 import { str } from "@/lib/validate";
 import type { Task } from "@/lib/types";
+import { remember } from "@/lib/knowledge/sources";
 
 const ERROR_STATUS = { BAD_ACTION: 400, FORBIDDEN: 403, BAD_STATE: 409 } as const;
 
@@ -255,6 +256,10 @@ export async function POST(
 
     return null;
   });
+
+  // The task's record changed: the memory reads it again, so the latest
+  // status, holder and result are what the assistant answers from.
+  void remember("task", taskId);
 
   if (handover) {
     // The new holder, the person who just handed it over, the author and

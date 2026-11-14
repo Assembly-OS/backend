@@ -1322,3 +1322,390 @@ BEGIN
   END LOOP;
 END;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- The organisational memory: what the AI assistant answers from.
+--
+-- Every record the platform already keeps — a task, a meeting, a journal
+-- entry, a chat attachment, a voice note, a project document, a library file
+-- — is read once into this contour and kept searchable here. The original
+-- rows stay where they are and remain the truth; what lives here is derived:
+-- the extracted text, cut into passages, with an optional embedding, and the
+-- facts the model read out of it, each pointing back at the row it came from.
+--
+-- Nothing here grants access. Who may read a passage is decided at retrieval
+-- time against the live tables (lib/knowledge/access.ts), so a change of
+-- project membership or a deleted message takes effect on the next question.
+-- ---------------------------------------------------------------------------
+
+-- The document library: files staff upload for the assistant to answer from,
+-- outside any project. `visibility` says who may read one: every member of
+-- staff (ALL), the members of one project (PROJECT), one department
+-- (DEPARTMENT), or the uploader alone (PRIVATE).
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title       TEXT NOT NULL,
+  file_key    TEXT NOT NULL,
+  file_name   TEXT NOT NULL,
+  file_size   INTEGER NOT NULL,
+  file_mime   TEXT NOT NULL,
+  -- What the file was: Word, Excel, PowerPoint, PDF, Rasm, Matn.
+  format      TEXT NOT NULL,
+  visibility  TEXT NOT NULL DEFAULT 'ALL',
+  project_id  INTEGER REFERENCES loyihalar(id) ON DELETE SET NULL,
+  department  TEXT,
+  -- Goes up every time the file is replaced; the source row follows it.
+  version     INTEGER NOT NULL DEFAULT 1,
+  uploaded_by INTEGER NOT NULL REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_project ON knowledge_documents(project_id);
+
+-- One row per original record read into the memory. (kind, ref_id) is the
+-- identity: ingesting the same record twice updates this row rather than
+-- adding a second one, and `fingerprint` — a hash of the content as read —
+-- is what tells an unchanged record from a changed one, so a re-run costs
+-- nothing when nothing moved.
+--
+-- `occurred_at` is when the thing happened (valid time); `created_at` and
+-- `indexed_at` are when the platform learned of it and when it was last read
+-- (ingestion time). The assistant is handed both.
+CREATE TABLE IF NOT EXISTS knowledge_sources (
+  id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  -- task | meeting | thread_entry | message | project_document | library
+  -- | kelishuv | agreement | project
+  kind          TEXT NOT NULL,
+  ref_id        INTEGER NOT NULL,
+  version       INTEGER NOT NULL DEFAULT 1,
+  fingerprint   TEXT,
+  title         TEXT NOT NULL DEFAULT '',
+  author_id     INTEGER,
+  occurred_at   TEXT,
+  lang          TEXT,
+  -- Where the record sits, copied for filtering; access itself is re-checked
+  -- against the live tables on every retrieval.
+  project_id    INTEGER,
+  company_id    INTEGER,
+  meeting_id    INTEGER,
+  task_id       INTEGER,
+  thread_id     INTEGER,
+  group_id      INTEGER,
+  from_user_id  INTEGER,
+  to_user_id    INTEGER,
+  uyushma_id    INTEGER,
+  -- How much to trust it when sources disagree: a confirmed task record
+  -- outranks a transcript, which outranks a chat line. 0..1.
+  reliability   REAL NOT NULL DEFAULT 0.7,
+  -- PENDING | PROCESSING | READY | PARTIAL | FAILED | DELETED | SKIPPED
+  status        TEXT NOT NULL DEFAULT 'PENDING',
+  -- Why a read failed or was partial, in a code the UI translates.
+  reason        TEXT,
+  text_chars    INTEGER NOT NULL DEFAULT 0,
+  chunk_count   INTEGER NOT NULL DEFAULT 0,
+  -- Whether the facts pass has run for this version.
+  facts_at      TEXT,
+  embedded_at   TEXT,
+  indexed_at    TEXT,
+  created_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  UNIQUE (kind, ref_id)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_status  ON knowledge_sources(status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_project ON knowledge_sources(project_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_when    ON knowledge_sources(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_sources_task    ON knowledge_sources(task_id);
+
+-- A source cut into passages of about a page, in reading order. The search
+-- column is kept by Postgres itself, with the `simple` configuration: the
+-- corpus is Uzbek, Russian and English at once and no one stemmer fits all
+-- three, so matching is by prefix (lib/knowledge/text.ts, `searchTerms`).
+--
+-- `embedding` is a plain float array rather than a pgvector column so the
+-- schema needs no extension the production image does not ship; similarity
+-- is `knowledge_cosine` below. Fine at the Assembly's scale (thousands of
+-- passages); a vector index is the upgrade path past that.
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id   INTEGER NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  position    INTEGER NOT NULL,
+  -- A heading or section label the passage sits under, when the text had one.
+  section     TEXT,
+  body        TEXT NOT NULL,
+  search      tsvector GENERATED ALWAYS AS (to_tsvector('simple', body)) STORED,
+  embedding   REAL[],
+  embedding_model TEXT,
+  UNIQUE (source_id, version, position)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_search ON knowledge_chunks USING GIN (search);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_source ON knowledge_chunks(source_id, position);
+
+-- What the model read out of a source: a decision, a commitment, an action
+-- item, a deadline, a plain fact. Each carries its provenance — the source
+-- and the passage it was read from, whether it was stated outright or
+-- inferred, and the model's confidence — so an answer can say which.
+-- A fact that names work already on the task list is linked to that task
+-- rather than raised again (`task_id`).
+CREATE TABLE IF NOT EXISTS knowledge_facts (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id   INTEGER NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL,
+  chunk_id    INTEGER REFERENCES knowledge_chunks(id) ON DELETE SET NULL,
+  -- decision | commitment | action_item | deadline | fact | risk
+  kind        TEXT NOT NULL,
+  subject     TEXT,
+  statement   TEXT NOT NULL,
+  -- Who is responsible, as written; resolved to a user when the name matched.
+  who         TEXT,
+  who_user_id INTEGER,
+  due_on      TEXT,
+  -- direct: written in the source. inferred: the model's reading of it.
+  stated      TEXT NOT NULL DEFAULT 'direct',
+  confidence  REAL NOT NULL DEFAULT 0.5,
+  -- The exact words the fact rests on, for the reader to check.
+  quote       TEXT,
+  task_id     INTEGER,
+  -- proposed | confirmed | rejected — a person's verdict, when given.
+  status      TEXT NOT NULL DEFAULT 'proposed',
+  search      tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(subject, '') || ' ' || statement || ' ' || coalesce(who, ''))) STORED,
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_facts_source ON knowledge_facts(source_id, version);
+CREATE INDEX IF NOT EXISTS idx_knowledge_facts_search ON knowledge_facts USING GIN (search);
+CREATE INDEX IF NOT EXISTS idx_knowledge_facts_task   ON knowledge_facts(task_id);
+
+-- Connections the reading found between records: a meeting that mentions a
+-- project, a message about a task, a document attached to a company. Each is
+-- evidence-backed (`source_id`) and never the only copy of anything.
+CREATE TABLE IF NOT EXISTS knowledge_links (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id   INTEGER NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+  -- project | person | task | company | meeting
+  to_kind     TEXT NOT NULL,
+  to_id       INTEGER NOT NULL,
+  -- mentions | about | assigned | produced | attached
+  relation    TEXT NOT NULL DEFAULT 'mentions',
+  confidence  REAL NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  UNIQUE (source_id, to_kind, to_id, relation)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_links_to ON knowledge_links(to_kind, to_id);
+
+-- The work queue. Reading a file, transcribing a recording, asking for
+-- embeddings and extracting facts all take seconds to minutes, so none of it
+-- runs inside the request that created the record: a job is queued and a
+-- worker picks it up (lib/knowledge/jobs.ts). Claiming uses SKIP LOCKED, so
+-- the web app and the bot can both run workers without doubling the work.
+-- A failed job is retried with a growing delay until `max_attempts`.
+CREATE TABLE IF NOT EXISTS knowledge_jobs (
+  id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id    INTEGER NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+  -- index (read + chunk) | embed | facts | reconcile
+  kind         TEXT NOT NULL DEFAULT 'index',
+  -- QUEUED | RUNNING | DONE | FAILED
+  status       TEXT NOT NULL DEFAULT 'QUEUED',
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 4,
+  run_after    TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  locked_at    TEXT,
+  locked_by    TEXT,
+  error        TEXT,
+  duration_ms  INTEGER,
+  created_at   TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  finished_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_due ON knowledge_jobs(status, run_after, id);
+-- One open job per (source, kind): a record edited three times in a minute
+-- is read once, not three times.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_jobs_open
+  ON knowledge_jobs(source_id, kind) WHERE status IN ('QUEUED', 'RUNNING');
+
+-- The passages an answer was built from, kept with the answer so "show me
+-- the evidence" works after a reload and after the records changed.
+ALTER TABLE assistant_messages ADD COLUMN IF NOT EXISTS evidence JSONB;
+
+-- Cosine similarity of two embeddings. Plain SQL over unnest: no extension,
+-- and a few milliseconds per thousand passages, which is the scale here.
+CREATE OR REPLACE FUNCTION knowledge_cosine(a REAL[], b REAL[]) RETURNS REAL AS $$
+  SELECT CASE
+    WHEN a IS NULL OR b IS NULL OR cardinality(a) = 0 OR cardinality(a) <> cardinality(b) THEN NULL
+    ELSE (
+      SELECT (SUM(x * y) / NULLIF(SQRT(SUM(x * x)) * SQRT(SUM(y * y)), 0))::real
+        FROM unnest(a, b) AS t(x, y)
+    )
+  END
+$$ LANGUAGE sql IMMUTABLE;
+
+-- The library's files are the Assembly's record as much as a project's
+-- documents are: a removed one goes to the archive like the rest.
+DO $$
+BEGIN
+  EXECUTE 'DROP TRIGGER IF EXISTS archive_on_delete ON knowledge_documents';
+  EXECUTE 'CREATE TRIGGER archive_on_delete BEFORE DELETE ON knowledge_documents '
+          'FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()';
+  EXECUTE 'DROP TRIGGER IF EXISTS audit_on_write ON knowledge_documents';
+  EXECUTE 'CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON knowledge_documents '
+          'FOR EACH ROW EXECUTE FUNCTION audit_row()';
+END;
+$$;
+
+-- A voice note's words, once the memory has transcribed it: kept on the
+-- message so the chat can show them and nothing transcribes the same audio
+-- twice.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript TEXT;
+
+-- ---------------------------------------------------------------------------
+-- Settings the chairman changes without a deployment (TZ 5.2: "nisbatlar
+-- sozlamalarda o'zgartiriladi"). One JSON document per key.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      JSONB NOT NULL,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+DO $$
+BEGIN
+  EXECUTE 'DROP TRIGGER IF EXISTS audit_on_write ON settings';
+  EXECUTE 'CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON settings '
+          'FOR EACH ROW EXECUTE FUNCTION audit_row()';
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- TZ block 6: the associations the Assembly is built on, and the nine-stage
+-- partnership path for companies.
+-- ---------------------------------------------------------------------------
+
+-- 6.1 The association record. The name the table was born with is the
+-- Uzbek (latin) one; the other three languages sit beside it.
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS name_uzc TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS name_ru TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS name_en TEXT;
+-- GR | BR | FR | PR — the department that answers for the association.
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS kontur TEXT;
+-- The member of staff who answers for it (TZ: "Assambleya mas'uli").
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS responsible_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+-- The association's own head: a name, a post and a way to reach them; the
+-- platform account, when there is one, stays in head_user_id.
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS head_name TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS head_position TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS head_contact TEXT;
+-- FAOL | SUST | TOXTATILGAN
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'FAOL';
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS updated_at TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS created_by INTEGER;
+
+-- The projects an association takes part in — several, so a link table
+-- rather than the one `loyihalar.uyushma_id` the first release had.
+CREATE TABLE IF NOT EXISTS uyushma_projects (
+  uyushma_id INTEGER NOT NULL REFERENCES uyushmalar(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  PRIMARY KEY (uyushma_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_uyushma_projects_project ON uyushma_projects(project_id);
+
+-- A company may belong to an association (its member companies).
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS uyushma_id INTEGER REFERENCES uyushmalar(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_partners_uyushma ON partners(uyushma_id);
+
+-- 6.2 The partnership path. Nine stages in place of four statuses; the
+-- status column stays and is written from the stage, so every page that
+-- filters by it keeps working.
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'NEW_CONTACT';
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS stage_since TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS deal_value DOUBLE PRECISION;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS deal_currency TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS next_step TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS next_step_on TEXT;
+-- 6.3 "tekshiruv holati": NOT_CHECKED | CHECKED | FLAGGED
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS verification TEXT NOT NULL DEFAULT 'NOT_CHECKED';
+CREATE INDEX IF NOT EXISTS idx_partners_stage ON partners(stage);
+
+-- Every move along the path, kept: the TZ asks for the transition history.
+CREATE TABLE IF NOT EXISTS partner_stage_history (
+  id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  from_stage TEXT,
+  to_stage   TEXT NOT NULL,
+  -- manual | meeting | kelishuv | contract — what moved it.
+  reason     TEXT NOT NULL DEFAULT 'manual',
+  note       TEXT,
+  changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  changed_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_partner_stage_history ON partner_stage_history(partner_id, id DESC);
+
+-- Once: companies that existed before the path get a stage from their
+-- status, and a clock that starts now rather than at their creation — a
+-- company "stuck" since 2026-08 on day one would ring every owner's bell.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_once WHERE key = 'partner_stage_backfill') THEN
+    UPDATE partners SET
+      stage = CASE status WHEN 'ACTIVE' THEN 'ACTIVE' WHEN 'PAUSED' THEN 'NEGOTIATION'
+                          WHEN 'ARCHIVED' THEN 'CLOSED' ELSE 'NEW_CONTACT' END,
+      stage_since = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+    WHERE stage_since IS NULL;
+    INSERT INTO schema_once (key) VALUES ('partner_stage_backfill');
+  END IF;
+END;
+$$;
+
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['uyushma_projects', 'partner_stage_history', 'uyushmalar'] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
+    EXECUTE format('CREATE TRIGGER archive_on_delete BEFORE DELETE ON %I FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()', t);
+    EXECUTE format('DROP TRIGGER IF EXISTS audit_on_write ON %I', t);
+    EXECUTE format('CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION audit_row()', t);
+  END LOOP;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- TZ block 8: decision points, review cadence, cached reports.
+-- ---------------------------------------------------------------------------
+
+-- 8.3: a project changes phase only through a decision — continue, rework or
+-- stop — taken by a named person and written down. The row keeps both ends
+-- of the move so the life cycle can be read back as a list of decisions.
+CREATE TABLE IF NOT EXISTS project_decisions (
+  id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project_id  INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  phase_from  TEXT,
+  phase_to    TEXT,
+  -- CONTINUE | REWORK | STOP
+  outcome     TEXT NOT NULL,
+  note        TEXT,
+  decided_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_project_decisions_project ON project_decisions(project_id, id DESC);
+
+-- 8.2: when the project was last looked at by its tier's rhythm — a decision,
+-- or a review that changed nothing. The next review is computed from it.
+ALTER TABLE loyihalar ADD COLUMN IF NOT EXISTS last_reviewed_at TEXT;
+
+-- 8.5: reports computed in the background, read at request time.
+CREATE TABLE IF NOT EXISTS report_cache (
+  key         TEXT PRIMARY KEY,
+  value       JSONB NOT NULL,
+  computed_at TEXT NOT NULL
+);
+
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['project_decisions'] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
+    EXECUTE format('CREATE TRIGGER archive_on_delete BEFORE DELETE ON %I FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()', t);
+    EXECUTE format('DROP TRIGGER IF EXISTS audit_on_write ON %I', t);
+    EXECUTE format('CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION audit_row()', t);
+  END LOOP;
+END;
+$$;

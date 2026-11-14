@@ -215,7 +215,86 @@ export async function sweepReminders(): Promise<number> {
     });
     fired++;
   }
-  return fired + (await sweepKelishuvTerms()) + (await sweepSilentTasks());
+  return (
+    fired +
+    (await sweepKelishuvTerms()) +
+    (await sweepSilentTasks()) +
+    (await sweepStuckPartners()) +
+    (await sweepExpiredProposals()) +
+    (await sweepReportCache())
+  );
+}
+
+/** TZ 8.5: the reports are computed here, not when somebody opens them. */
+async function sweepReportCache(): Promise<number> {
+  const { refreshReportCache } = await import("./reports");
+  return await refreshReportCache();
+}
+
+/** TZ 7.1 "eskirish": proposals nobody looked at are archived, by the days in settings. */
+async function sweepExpiredProposals(): Promise<number> {
+  const { aiSettings } = await import("./settings");
+  const { expireProposals } = await import("./agents/orchestrator");
+  return await expireProposals((await aiSettings()).expireDays);
+}
+
+/* ------------------------------------------------------------------ */
+/* Companies stuck on the partnership path (TZ 6.2)                    */
+/* ------------------------------------------------------------------ */
+
+const STUCK_LABELS: Record<string, string> = {
+  uz: "Hamkorlik qotib qoldi",
+  uzc: "Ҳамкорлик қотиб қолди",
+  ru: "Партнёрство застряло",
+  en: "A partnership is stuck",
+};
+
+/**
+ * Tells the company's owner when it has sat at a stage past the stage's
+ * limit ("Qotib qolgan"). Once per stay: keyed on the moment the stage
+ * began, so a move to the next stage closes it and only a new overstay
+ * rings again. Companies nobody owns ring the chairman's side instead.
+ */
+async function sweepStuckPartners(): Promise<number> {
+  const { stageLimits } = await import("./settings");
+  const { isStuck } = await import("./crm-stages");
+  const limits = await stageLimits();
+  const rows = await all<{
+    id: number;
+    name: string;
+    stage: keyof typeof limits;
+    stage_since: string | null;
+    owner_user_id: number | null;
+  }>("SELECT id, name, stage, stage_since, owner_user_id FROM partners WHERE stage <> 'CLOSED' AND stage_since IS NOT NULL");
+  const today = new Date();
+  let fired = 0;
+  for (const row of rows) {
+    if (!isStuck(row.stage, row.stage_since, limits, today)) continue;
+    const recipients = row.owner_user_id
+      ? [row.owner_user_id]
+      : (await all<{ id: number }>("SELECT id FROM users WHERE role = 'RAIS' AND is_active = 1")).map((u) => u.id);
+    for (const userId of recipients) {
+      const label = STUCK_LABELS[await langOf(userId)] ?? STUCK_LABELS.uz;
+      if (
+        await notify({
+          userId,
+          kind: "agreement",
+          title: `${label} · ${row.name}`,
+          body: `${row.stage} · ${row.stage_since!.slice(0, 10)}`,
+          href: `/companies/${row.id}`,
+          // The company in the entity, the stay in the id: a later overstay
+          // of the same company is a new notice. The id is the day the
+          // stay began, counted from the epoch — small enough for an
+          // integer column, unlike a timestamp written out as digits.
+          entity: `partner-stuck-${row.id}`,
+          entityId: Math.floor(Date.parse(`${row.stage_since!.replace(" ", "T")}Z`) / 86_400_000) || row.id,
+          push: true,
+        })
+      )
+        fired++;
+    }
+  }
+  return fired;
 }
 
 /* ------------------------------------------------------------------ */

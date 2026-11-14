@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { now, run } from "@/lib/pg";
+import { insert, now } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import {
@@ -10,6 +10,7 @@ import {
   THREAD_PAGE,
 } from "@/lib/queries";
 import { id as parseId, str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /** Resolves the group and confirms the caller is in it. */
 async function resolve(idParam: string) {
@@ -61,13 +62,14 @@ export async function POST(
   const text = str(body, 4000);
   if (!text) return NextResponse.json({ error: "EMPTY" }, { status: 400 });
 
-  await run(
+  const messageId = await insert(
     "INSERT INTO messages (from_user_id, group_id, body, created_at) VALUES (?,?,?,?)",
     user.id,
     groupId,
     text,
     now(),
   );
+  void remember("message", messageId);
 
   // The sender has by definition read their own message.
   await markGroupRead(groupId, user.id);

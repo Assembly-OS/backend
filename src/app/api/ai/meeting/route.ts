@@ -6,6 +6,7 @@ import { canSubmitToAi } from "@/lib/agents/access";
 import { resolvePath, safeName, store } from "@/lib/uploads";
 import { transcribeAudio, transcriptionAvailable } from "@/lib/agents/transcribe";
 import { oneOf, str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * A recorded meeting arrives here as audio, as a transcript, or as both.
@@ -138,6 +139,8 @@ export async function POST(request: Request) {
     transcript,
     lang,
   );
+  // Into the organisational memory, with whatever the analysis concluded.
+  void remember("meeting", meetingId);
   // `transcript` goes back so the page can show what the server heard — the
   // person who ran the meeting is the only one who can tell a mishearing from
   // a decision, and they should see it, not just its consequences.

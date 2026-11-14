@@ -6,6 +6,7 @@ import { threadRights } from "@/lib/project-visibility";
 import { MAX_BYTES, resolveKind, safeName, store } from "@/lib/uploads";
 import { readAttachment } from "@/lib/agents/read-file";
 import { id as parseId, str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Reading further back into a thread. The page renders the recent window
@@ -109,6 +110,7 @@ export async function POST(
       fileSize: stored.size,
       fileText,
     });
+    void remember("thread_entry", id);
     return NextResponse.json({ ok: true, id, read: Boolean(fileText) });
   }
 
@@ -134,5 +136,6 @@ export async function POST(
     taskId,
   });
 
+  void remember("thread_entry", id);
   return NextResponse.json({ ok: true, id });
 }

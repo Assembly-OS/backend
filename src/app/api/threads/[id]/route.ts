@@ -9,6 +9,7 @@ import {
   updateThread,
 } from "@/lib/project-threads";
 import { id as parseId, str } from "@/lib/validate";
+import { forgetThread } from "@/lib/knowledge/sources";
 
 /**
  * Renaming a thread, moving it onto a company, rewriting the line that says
@@ -88,5 +89,6 @@ export async function DELETE(
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
 
   await deleteThread(thread.id, user.id);
+  await forgetThread(thread.id);
   return NextResponse.json({ ok: true });
 }

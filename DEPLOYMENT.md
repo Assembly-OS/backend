@@ -19,3 +19,7 @@ hash without placing the password on the command line by setting
 The local Whisper model and VAD model are mounted read-only at `/models`. The
 image contains pinned `whisper-cli` and ffmpeg binaries, but never embeds model
 weights or application data.
+
+The organisational memory (the AI chat's sources, the library at `/knowledge`,
+the background worker and its configuration) is described in
+`DEPLOYMENT.knowledge.md`.

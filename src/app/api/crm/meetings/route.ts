@@ -5,10 +5,11 @@ import { raiseNextStep, readMeetingInput } from "./input";
 import { currentUser } from "@/lib/session";
 import { mayRecordMeeting } from "@/lib/meeting-visibility";
 import { canWrite } from "@/lib/crm-access";
-import { createAgreement, touchCompany } from "@/lib/crm";
+import { advanceStage, createAgreement, touchCompany } from "@/lib/crm";
 import { runMeetingIntake } from "@/lib/agents/intake-runner";
 import { assignableUsers } from "@/lib/queries";
 import { id as parseId, oneOf, str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * A meeting typed in by hand, optionally with its transcript, optionally
@@ -76,7 +77,11 @@ export async function POST(request: Request) {
     return id;
   });
 
-  if (companyId) await touchCompany(companyId, heldAt ?? now().slice(0, 10));
+  if (companyId) {
+    await touchCompany(companyId, heldAt ?? now().slice(0, 10));
+    // TZ 6.2, stage 3: a meeting record exists with the company.
+    await advanceStage(companyId, "meeting", user.id, title);
+  }
 
   // Agreements the person typed in themselves, before any model sees the text.
   const manual = Array.isArray(body.agreements) ? body.agreements : [];
@@ -109,6 +114,9 @@ export async function POST(request: Request) {
   }
 
   const task = await raiseNextStep(meetingId, input, user);
+
+  // Into the organisational memory — fields, conclusions and transcript.
+  void remember("meeting", meetingId);
 
   return NextResponse.json({
     ok: true,

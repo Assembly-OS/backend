@@ -1,4 +1,11 @@
 import { all, get, insert, now, run } from "@/lib/pg";
+import { matchCompany } from "../meeting-fields";
+import { isStage } from "../crm-stages";
+import { PHASES, type Phase } from "../project-passport";
+import { projectScope, type Viewer } from "../project-visibility";
+import type { RecordPayload } from "./records";
+import { autoApprovable } from "../signal-rules";
+import { aiSettings } from "../settings";
 import { notifyBot } from "@/lib/notify-bot";
 import { assignableUsers } from "@/lib/queries";
 import { projectOptions } from "@/lib/project-visibility";
@@ -17,6 +24,8 @@ import {
   type Candidate,
   type DraftTask,
   type MeetingAnalysis,
+  type IntakeContext,
+  type RecordDrafts,
 } from "./intake";
 import { recallMemory, rememberFacts } from "./live";
 import { recordPartners } from "./partners";
@@ -246,6 +255,11 @@ async function reviewerFor(assigneeId: number, owner: User): Promise<number> {
  * The proposal row is written first either way, so a task can never exist
  * without the record of which run produced it.
  */
+/** How loud a draft is: urgent work is P2, the rest P3. */
+function severityFor(draft: DraftTask): string {
+  return draft.priority === "KRITIK" || draft.priority === "YUQORI" ? "P2" : "P3";
+}
+
 async function fileDraft(
   runId: number,
   agent: AgentSpec,
@@ -278,7 +292,7 @@ async function fileDraft(
     `${draft.description}\n\nMas'ul: ${target.full_name} (@${target.login})` +
       `${deadline ? `\nMuddat: ${deadline}` : ""}` +
       `\nMuhimlik: ${draft.priority}\n\nAsos: ${draft.rationale}`,
-    draft.priority === "KRITIK" || draft.priority === "YUQORI" ? "P2" : "P3",
+    severityFor(draft),
     "user",
     assignee.id,
     JSON.stringify({
@@ -294,7 +308,18 @@ async function fileDraft(
     now(),
   );
 
-  if (!runsImmediately(agent, "suggest_task")) return "queued";
+  if (!runsImmediately(agent, "suggest_task")) {
+    // TZ 7.1: a low-risk draft turns into the assignment on its own when the
+    // chairman's side has switched that on. Off by default; the severity
+    // limit is theirs too. The decision goes through the same gate a person
+    // uses, so the priority limits and the audit row are the same.
+    if (autoApprovable(severityFor(draft), await aiSettings())) {
+      const { decideProposal } = await import("./orchestrator");
+      const outcome = await decideProposal(proposalId, "approve", "auto");
+      return outcome.ok ? "created" : "queued";
+    }
+    return "queued";
+  }
 
   try {
     const code = await createTaskFromProposal(owner.id, {
@@ -312,6 +337,198 @@ async function fileDraft(
     // person is better than one that is silently lost.
     return "queued";
   }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Record drafts (TZ 7.2)                                              */
+/* ------------------------------------------------------------------ */
+
+/** The base the model is shown, so its drafts name what exists. */
+export async function intakeContext(owner: Viewer): Promise<IntakeContext> {
+  const scope = projectScope(owner);
+  return {
+    companies: await all<{ id: number; name: string; stage: string }>(
+      "SELECT id, name, stage FROM partners ORDER BY name LIMIT 300",
+    ),
+    projects: await all<{ id: number; code: string; name: string; phase: string | null }>(
+      `SELECT l.id, l.code, l.name, l.phase FROM loyihalar l WHERE ${scope.sql} ORDER BY l.code LIMIT 150`,
+      ...scope.params,
+    ),
+  };
+}
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const dateOr = (value: string | undefined) => (value && DATE.test(value) ? value : null);
+const textOr = (value: string | undefined, max: number) => (value?.trim() ? value.trim().slice(0, max) : null);
+
+/** A project named by code, or by name when the code is not in the list. */
+function matchProject(named: string, projects: IntakeContext["projects"]): number | null {
+  const key = named.trim().toLowerCase();
+  if (!key) return null;
+  const byCode = projects.find((p) => p.code.toLowerCase() === key);
+  if (byCode) return byCode.id;
+  const byName = projects.filter((p) => p.name.toLowerCase() === key || key.includes(p.name.toLowerCase()));
+  return byName.length === 1 ? byName[0].id : null;
+}
+
+/**
+ * Files what a document or meeting carried besides tasks: an agreement's
+ * card, a company not yet in the base, a stage move, a phase a report
+ * claims. Each is a proposal the submitter confirms — the TZ's rule that
+ * the result is a proposal, never an automatic record. A stage or phase
+ * naming nothing the base holds is dropped: there is nothing to move.
+ */
+export async function fileRecordDrafts(
+  runId: number,
+  agent: AgentSpec,
+  owner: User,
+  drafts: Partial<RecordDrafts>,
+  context: IntakeContext,
+  candidates: Candidate[],
+  meetingId: number | null = null,
+): Promise<{ queued: number; dropped: number }> {
+  let queued = 0;
+  let dropped = 0;
+  const logins = new Map(candidates.map((c) => [c.login.toLowerCase(), c.login]));
+  const file = async (
+    title: string,
+    body: string,
+    severity: string,
+    subject: { kind: string; id: number } | null,
+    payload: RecordPayload,
+  ) => {
+    await insert(
+      `INSERT INTO agent_proposals
+         (run_id, agent, action, title, body, severity, subject_kind, subject_id, payload, status, owner_user_id, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      runId,
+      agent.id,
+      "suggest_record",
+      title.slice(0, 200),
+      body,
+      severity,
+      subject?.kind ?? null,
+      subject?.id ?? null,
+      JSON.stringify(payload),
+      "pending",
+      owner.id,
+      now(),
+    );
+    queued++;
+  };
+
+  for (const draft of drafts.kelishuvlar ?? []) {
+    if (!draft.title?.trim()) {
+      dropped++;
+      continue;
+    }
+    const parties = (draft.parties ?? []).map((name) => name.trim()).filter(Boolean);
+    const partyIds = parties
+      .map((name) => matchCompany(name, context.companies))
+      .filter((id): id is number => id !== null);
+    const owners = await Promise.all(
+      (draft.obligations ?? []).map(async (o) => {
+        const login = logins.get(o.owner?.trim().toLowerCase() ?? "");
+        const row = login ? await get<{ id: number }>("SELECT id FROM users WHERE login = ?", login) : null;
+        return { description: o.description?.trim() ?? "", owner_user_id: row?.id ?? null, deadline: dateOr(o.deadline) };
+      }),
+    );
+    await file(
+      `Kelishuv: ${draft.title}`,
+      `${draft.content ?? ""}\n\nTomonlar: ${parties.join(", ") || "—"}` +
+        `${draft.amount ? `\nSumma: ${draft.amount} ${draft.currency ?? ""}` : ""}` +
+        `${draft.signed_on ? `\nImzolangan: ${draft.signed_on}` : ""}` +
+        `${owners.length ? `\nMajburiyatlar: ${owners.length}` : ""}` +
+        `\n\nAsos: ${draft.rationale ?? ""}`,
+      "P2",
+      partyIds[0] ? { kind: "company", id: partyIds[0] } : null,
+      {
+        kind: "kelishuv",
+        title: draft.title.trim(),
+        agreementKind: textOr(draft.kind, 20),
+        content: textOr(draft.content, 8000),
+        party_ids: [...new Set(partyIds)],
+        parties,
+        amount: Number.isFinite(draft.amount) && draft.amount > 0 ? draft.amount : null,
+        currency: textOr(draft.currency, 3),
+        signed_on: dateOr(draft.signed_on),
+        valid_until: dateOr(draft.valid_until),
+        loyiha_id: null,
+        meeting_id: meetingId,
+        obligations: owners.filter((o) => o.description),
+      },
+    );
+  }
+
+  for (const draft of drafts.companies ?? []) {
+    const name = draft.name?.trim();
+    if (!name || matchCompany(name, context.companies) !== null) {
+      dropped++;
+      continue;
+    }
+    await file(
+      `Yangi kompaniya: ${name}`,
+      `${draft.description ?? ""}\n${[draft.industry, draft.country, draft.city].filter(Boolean).join(" · ")}` +
+        `${draft.head_name ? `\nRahbar: ${draft.head_name}${draft.head_position ? `, ${draft.head_position}` : ""}` : ""}` +
+        `\n\nAsos: ${draft.rationale ?? ""}`,
+      "P3",
+      null,
+      {
+        kind: "company",
+        name,
+        industry: textOr(draft.industry, 120),
+        description: textOr(draft.description, 2000),
+        head_name: textOr(draft.head_name, 160),
+        head_position: textOr(draft.head_position, 120),
+        country: textOr(draft.country, 80),
+        city: textOr(draft.city, 80),
+        website: textOr(draft.website, 200),
+      },
+    );
+  }
+
+  for (const draft of drafts.stageUpdates ?? []) {
+    const companyId = matchCompany(draft.company ?? "", context.companies);
+    if (!companyId || !isStage(draft.stage)) {
+      dropped++;
+      continue;
+    }
+    const company = context.companies.find((c) => c.id === companyId)!;
+    if (company.stage === draft.stage) {
+      dropped++;
+      continue;
+    }
+    await file(
+      `Bosqich: ${company.name} → ${draft.stage}`,
+      `${company.stage} → ${draft.stage}\n\nAsos: ${draft.rationale ?? ""}`,
+      "P3",
+      { kind: "company", id: companyId },
+      { kind: "stage", company_id: companyId, stage: draft.stage, rationale: textOr(draft.rationale, 1000) },
+    );
+  }
+
+  for (const draft of drafts.phaseUpdates ?? []) {
+    const projectId = matchProject(draft.project ?? "", context.projects);
+    if (!projectId || !PHASES.includes(draft.phase as Phase)) {
+      dropped++;
+      continue;
+    }
+    const project = context.projects.find((p) => p.id === projectId)!;
+    if (project.phase === draft.phase) {
+      dropped++;
+      continue;
+    }
+    await file(
+      `Loyiha fazasi: ${project.code} → ${draft.phase}`,
+      `${project.name}: ${project.phase ?? "—"} → ${draft.phase}\n\nAsos: ${draft.rationale ?? ""}`,
+      "P2",
+      { kind: "project", id: projectId },
+      { kind: "phase", project_id: projectId, phase: draft.phase, rationale: textOr(draft.rationale, 1000) },
+    );
+  }
+
+  return { queued, dropped };
 }
 
 /**
@@ -349,12 +566,14 @@ export async function runDocumentIntake(
     };
   }
 
+  const context = await intakeContext(owner);
   const analysis = await analyzeDocument(
     bytes,
     source,
     fileName,
     candidates,
     agent.tokenBudget,
+    context,
   );
   if (!analysis) {
     const runId = await writeRun({
@@ -418,8 +637,12 @@ export async function runDocumentIntake(
     else dropped++;
   }
 
+  const records = await fileRecordDrafts(runId, agent, owner, analysis, context, candidates);
+  drafts += records.queued;
+
   const notes: string[] = [];
   if (created > 0) notes.push(`${created} ta topshiriq yaratildi`);
+  if (records.queued > 0) notes.push(`${records.queued} ta yozuv taklifi (${analysis.kind})`);
   if (dropped > 0)
     notes.push(`${dropped} ta taklif noto'g'ri mas'ul tufayli rad etildi`);
   if (notes.length > 0) {
@@ -626,6 +849,8 @@ export async function runMeetingIntake(
   // What this meeting should still be known for. Written before the tasks so
   // a failure to create one does not cost the record of why it existed.
   const remembered = await rememberFacts(meetingId, analysis.memory ?? []);
+  // The agreement reached and the companies met, as drafts (TZ 7.2).
+  await fileRecordDrafts(runId, agent, owner, analysis, await intakeContext(owner), candidates, meetingId);
   // Who this meeting was with, and what to put to them next.
   const partners = await recordPartners(meetingId, analysis.partners ?? []);
 

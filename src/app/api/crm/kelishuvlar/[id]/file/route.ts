@@ -5,6 +5,7 @@ import { get, now, tx, type Tx } from "@/lib/pg";
 import { MAX_BYTES, baseMime, read, safeName, store } from "@/lib/uploads";
 import type { User } from "@/lib/types";
 import { id as parseId } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * The signed copy of an agreement — TZ block 1.2, "hujjat fayli: imzolangan
@@ -141,6 +142,8 @@ export async function POST(request: Request, { params }: Params) {
     );
   });
 
+  // The signed copy's words go into the memory with the agreement.
+  void remember("kelishuv", id);
   return NextResponse.json({ ok: true, file_name: name, file_size: stored.size });
 }
 

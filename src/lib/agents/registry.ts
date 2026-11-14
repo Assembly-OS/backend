@@ -27,6 +27,7 @@ export type ActionVerb =
   | "notify" // send a message to a person through the bot
   | "flag" // raise a risk for a human to look at
   | "suggest_task" // draft an assignment for a human to confirm
+  | "suggest_record" // draft a record — an agreement, a company, a stage or phase move — for a human to confirm (TZ 7.2)
   | "escalate"; // route an overdue item up the management line
 
 /** Every agent named in TZ §10, in the order the specification lists them. */
@@ -230,7 +231,7 @@ export const AGENTS: AgentSpec[] = [
     // Needs the staff list to name an owner for each extracted task, and the
     // task list so it does not re-raise work that already exists.
     dataScope: ["staff", "tasks"],
-    actionScope: ["report", "suggest_task", "notify"],
+    actionScope: ["report", "suggest_task", "suggest_record", "notify"],
     approval: "always",
     // The brief is sent rather than queued — a summary nobody has read yet is
     // the one thing that must not wait. Assignments are not on that list: they
@@ -247,7 +248,7 @@ export const AGENTS: AgentSpec[] = [
     title: "Document Agent",
     task: "PDF hujjatni tahlil qilish, topshiriqlarni ajratib olish va mas'ullarga taqsimlash.",
     dataScope: ["staff", "tasks"],
-    actionScope: ["report", "suggest_task"],
+    actionScope: ["report", "suggest_task", "suggest_record"],
     approval: "always",
     tokenBudget: 30_000,
     status: "active",
