@@ -3,6 +3,7 @@ import { resolvePath, safeName, store } from "../uploads";
 import { transcribeAudio, transcriptionAvailable } from "./transcribe";
 import { runMeetingIntake } from "./intake-runner";
 import type { User } from "../types";
+import { remember } from "../knowledge/sources";
 
 /**
  * Turning a recording into a minuted meeting.
@@ -104,5 +105,7 @@ export async function ingestMeeting(
     input.lang,
   );
 
+  // Into the organisational memory, with whatever the analysis concluded.
+  void remember("meeting", meetingId);
   return { meetingId, transcript, transcribedHere, intake };
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { now, run } from "@/lib/pg";
+import { insert, now } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import {
@@ -16,6 +16,7 @@ import {
   safeName,
   store,
 } from "@/lib/uploads";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Attachment upload into a group. Same contract and same limits as the
@@ -72,7 +73,7 @@ export async function POST(
   const name = safeName(blob.name ?? "", kind);
   const stored = store(bytes, kind, mime, name);
 
-  await run(
+  const messageId = await insert(
     `INSERT INTO messages
        (from_user_id, group_id, body, kind, file_name, file_size, file_mime, file_key, duration, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -90,6 +91,9 @@ export async function POST(
 
   await markGroupRead(groupId, user.id);
   publish(...(await groupMembers(groupId)).map((member) => member.id));
+
+  // Transcribed or read in the background, for the group's members only.
+  void remember("message", messageId);
 
   return NextResponse.json({ messages: await groupThread(groupId) });
 }

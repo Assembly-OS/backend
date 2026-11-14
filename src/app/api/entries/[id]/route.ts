@@ -10,6 +10,7 @@ import {
   pinEntry,
 } from "@/lib/project-threads";
 import { id as parseId, str } from "@/lib/validate";
+import { forget, remember } from "@/lib/knowledge/sources";
 
 /**
  * Correcting an entry, or marking it as worth finding again.
@@ -52,6 +53,7 @@ export async function PATCH(
     if (!entry.file_key)
       return NextResponse.json({ error: "NO_FILE" }, { status: 404 });
     await detachFile(entry.id);
+    void remember("thread_entry", entry.id);
     return NextResponse.json({ ok: true });
   }
 
@@ -64,6 +66,7 @@ export async function PATCH(
     text,
     day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null,
   );
+  void remember("thread_entry", entry.id);
   return NextResponse.json({ ok: true });
 }
 
@@ -92,5 +95,6 @@ export async function DELETE(
     return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
 
   await deleteEntry(entry.id, user.id);
+  await forget("thread_entry", entry.id);
   return NextResponse.json({ ok: true });
 }

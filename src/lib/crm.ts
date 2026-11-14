@@ -1,6 +1,7 @@
 import { actingAs } from "./archive";
 import { all, get, insert, now, run, tx } from "./pg";
 import { notify } from "./notifications";
+import { remember } from "./knowledge/sources";
 
 /**
  * The CRM half of the platform: companies, the people inside them, the
@@ -489,6 +490,8 @@ export async function createAgreement(input: AgreementInput): Promise<number> {
       );
     }
   }
+  // Into the organisational memory, read in the background.
+  void remember("agreement", id);
   return id;
 }
 
@@ -509,6 +512,7 @@ export async function setAgreementStatus(
       id,
     );
   }
+  void remember("agreement", id);
 }
 
 /* ------------------------------------------------------------------ */

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { now, run } from "@/lib/pg";
+import { insert, now } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { canMessage, thread, userByLogin } from "@/lib/queries";
@@ -11,6 +11,7 @@ import {
   safeName,
   store,
 } from "@/lib/uploads";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Attachment upload for one conversation: `multipart/form-data` carrying the
@@ -78,7 +79,7 @@ export async function POST(
   const name = safeName(blob.name ?? "", kind);
   const stored = store(bytes, kind, mime, name);
 
-  await run(
+  const messageId = await insert(
     `INSERT INTO messages
        (from_user_id, to_user_id, body, kind, file_name, file_size, file_mime, file_key, duration, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -95,6 +96,10 @@ export async function POST(
   );
 
   publish(user.id, other.id);
+
+  // A voice note is transcribed and a document read in the background, for
+  // the two people in this conversation and nobody else.
+  void remember("message", messageId);
 
   return NextResponse.json({ messages: await thread(user.id, other.id) });
 }

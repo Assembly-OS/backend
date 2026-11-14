@@ -6,6 +6,7 @@ import { setMeetingLinks } from "@/lib/meetings";
 import { get, now, tx } from "@/lib/pg";
 import { id as parseId, str } from "@/lib/validate";
 import { raiseNextStep, readMeetingInput } from "../input";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Editing a meeting after the fact.
@@ -83,5 +84,6 @@ export async function PATCH(
     await touchCompany(input.company_id, input.held_at ?? now().slice(0, 10));
 
   const task = await raiseNextStep(meetingId, input, user);
+  void remember("meeting", meetingId);
   return NextResponse.json({ ok: true, id: meetingId, task });
 }

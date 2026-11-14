@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { all, now, run } from "@/lib/pg";
+import { all, insert, now } from "@/lib/pg";
 import { currentUser } from "@/lib/session";
 import { publish } from "@/lib/events";
 import { canMessage, thread, THREAD_PAGE, userByLogin } from "@/lib/queries";
 import { str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 async function resolve(loginParam: string) {
   const user = await currentUser();
@@ -67,13 +68,15 @@ export async function POST(
   const text = str(body, 4000);
   if (!text) return NextResponse.json({ error: "EMPTY" }, { status: 400 });
 
-  await run(
+  const messageId = await insert(
     "INSERT INTO messages (from_user_id, to_user_id, body, created_at) VALUES (?,?,?,?)",
     user.id,
     other.id,
     text,
     now(),
   );
+  // Into the memory, for its two readers only (see lib/knowledge/access.ts).
+  void remember("message", messageId);
 
   // The recipient's open thread, chat list and unread badge update instantly.
   publish(user.id, other.id);

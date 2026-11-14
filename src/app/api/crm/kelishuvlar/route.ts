@@ -4,6 +4,7 @@ import { canWrite } from "@/lib/crm-access";
 import { setParties } from "@/lib/kelishuvlar";
 import { now, tx } from "@/lib/pg";
 import { readKelishuvInput, syncObligations } from "./input";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Records an agreement: the document, its parties and its obligations.
@@ -53,5 +54,6 @@ export async function POST(request: Request) {
   });
 
   await syncObligations(id, input, user);
+  void remember("kelishuv", id);
   return NextResponse.json({ ok: true, id });
 }

@@ -56,15 +56,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: outcome.reason }, { status });
   }
 
-  const { answer, refs, steps } = outcome.reply;
+  const { answer, refs, evidence, steps } = outcome.reply;
   if (!answer) return NextResponse.json({ error: "TOO_COMPLEX" }, { status: 422 });
 
   // Deduped upstream; capped here so a broad question does not return a wall
   // of links under a three-line answer.
   const shown = refs.slice(0, 12);
-  await appendExchange(user.id, question, answer, shown);
+  const kept = evidence.slice(0, 16);
+  await appendExchange(user.id, question, answer, shown, kept);
 
-  return NextResponse.json({ answer, refs: shown, steps });
+  return NextResponse.json({ answer, refs: shown, evidence: kept, steps });
 }
 
 /** Clears this person's conversation. Only ever their own. */

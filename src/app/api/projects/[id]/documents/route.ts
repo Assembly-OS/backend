@@ -4,6 +4,7 @@ import { projectRights } from "@/lib/project-visibility";
 import { addDocument, isDocumentKind } from "@/lib/project-documents";
 import { MAX_BYTES, baseMime, safeName, store } from "@/lib/uploads";
 import { id as parseId, str } from "@/lib/validate";
+import { remember } from "@/lib/knowledge/sources";
 
 /**
  * Adds a document to a project's passport: a master plan, a feasibility
@@ -57,5 +58,7 @@ export async function POST(
     file: { key: stored.key, name, size: stored.size },
     userId: user.id,
   });
+  // Read into the organisational memory in the background.
+  void remember("project_document", id);
   return NextResponse.json({ id }, { status: 201 });
 }

@@ -23,4 +23,10 @@ export async function register(): Promise<void> {
   // have to exist first.
   const { importLegacy } = await import("./lib/import-legacy");
   await importLegacy();
+
+  // The memory's worker: a pass over the queue every half minute, in this
+  // process, so a saved record is read without a separate service to run.
+  // `KNOWLEDGE_WORKER=0` turns it off where another process runs the queue.
+  const { startWorker } = await import("./lib/knowledge/jobs");
+  startWorker(Number(process.env.KNOWLEDGE_WORKER_INTERVAL_MS ?? 30_000));
 }

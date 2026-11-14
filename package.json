@@ -9,7 +9,7 @@
     "lint": "eslint",
     "seed": "node scripts/seed.mjs",
     "reset-db": "rm -f data/assambleya.db && node scripts/seed.mjs",
-    "test": "node --test test/*.test.ts",
+    "test": "node --import ./test/register.mjs --test test/*.test.ts",
     "secret:generate": "node scripts/generate-secret.mjs",
     "admin:hash": "node scripts/hash-admin-password.mjs"
   },

@@ -3,6 +3,7 @@ import { currentUser } from "@/lib/session";
 import { projectRights } from "@/lib/project-visibility";
 import { removeDocument } from "@/lib/project-documents";
 import { id as parseId } from "@/lib/validate";
+import { forget } from "@/lib/knowledge/sources";
 
 /** Takes a document off the project. The row and the file are kept in the archive. */
 export async function DELETE(
@@ -23,5 +24,6 @@ export async function DELETE(
 
   const removed = await removeDocument(project.id, documentId, user.id);
   if (!removed) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  await forget("project_document", documentId);
   return NextResponse.json({ ok: true });
 }

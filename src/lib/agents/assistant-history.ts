@@ -1,5 +1,5 @@
 import { all, run } from "../pg";
-import type { Ref } from "./assistant";
+import type { Evidence, Ref } from "./assistant";
 
 /**
  * The AI chat's memory.
@@ -26,6 +26,8 @@ export interface StoredTurn {
   role: "user" | "assistant";
   content: string;
   refs: Ref[];
+  /** The passages the answer rested on, kept so they can be inspected later. */
+  evidence: Evidence[];
 }
 
 interface Row {
@@ -33,6 +35,7 @@ interface Row {
   role: string;
   content: string;
   refs: string;
+  evidence: Evidence[] | null;
 }
 
 function parseRefs(json: string): Ref[] {
@@ -52,7 +55,7 @@ export async function chatHistory(
   limit = KEEP,
 ): Promise<StoredTurn[]> {
   const rows = await all<Row>(
-    `SELECT id, role, content, refs FROM assistant_messages
+    `SELECT id, role, content, refs, evidence FROM assistant_messages
       WHERE user_id = ? ORDER BY id DESC LIMIT ?`,
     userId,
     limit,
@@ -62,6 +65,7 @@ export async function chatHistory(
     role: row.role === "user" ? "user" : "assistant",
     content: row.content,
     refs: parseRefs(row.refs),
+    evidence: Array.isArray(row.evidence) ? row.evidence : [],
   }));
 }
 
@@ -77,6 +81,7 @@ export async function appendExchange(
   question: string,
   answer: string,
   refs: Ref[],
+  evidence: Evidence[] = [],
 ): Promise<void> {
   await run(
     "INSERT INTO assistant_messages (user_id, role, content) VALUES (?, 'user', ?)",
@@ -84,10 +89,13 @@ export async function appendExchange(
     question.slice(0, 4000),
   );
   await run(
-    "INSERT INTO assistant_messages (user_id, role, content, refs) VALUES (?, 'assistant', ?, ?)",
+    `INSERT INTO assistant_messages (user_id, role, content, refs, evidence)
+     VALUES (?, 'assistant', ?, ?, ?::jsonb)`,
     userId,
     answer.slice(0, 20_000),
     JSON.stringify(refs.slice(0, 12)),
+    // Bounded: the excerpts, not the passages — the evidence page has those.
+    JSON.stringify(evidence.slice(0, 16)),
   );
   // Trim here rather than on a schedule: the table only grows when somebody
   // is using it, so the moment of growth is the cheapest moment to prune.
