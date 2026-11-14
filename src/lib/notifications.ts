@@ -215,7 +215,27 @@ export async function sweepReminders(): Promise<number> {
     });
     fired++;
   }
-  return fired + (await sweepKelishuvTerms()) + (await sweepSilentTasks()) + (await sweepStuckPartners());
+  return (
+    fired +
+    (await sweepKelishuvTerms()) +
+    (await sweepSilentTasks()) +
+    (await sweepStuckPartners()) +
+    (await sweepExpiredProposals()) +
+    (await sweepReportCache())
+  );
+}
+
+/** TZ 8.5: the reports are computed here, not when somebody opens them. */
+async function sweepReportCache(): Promise<number> {
+  const { refreshReportCache } = await import("./reports");
+  return await refreshReportCache();
+}
+
+/** TZ 7.1 "eskirish": proposals nobody looked at are archived, by the days in settings. */
+async function sweepExpiredProposals(): Promise<number> {
+  const { aiSettings } = await import("./settings");
+  const { expireProposals } = await import("./agents/orchestrator");
+  return await expireProposals((await aiSettings()).expireDays);
 }
 
 /* ------------------------------------------------------------------ */
@@ -262,9 +282,12 @@ async function sweepStuckPartners(): Promise<number> {
           title: `${label} · ${row.name}`,
           body: `${row.stage} · ${row.stage_since!.slice(0, 10)}`,
           href: `/companies/${row.id}`,
-          entity: "partner-stuck",
-          // The stay, not the company: a later overstay is a new notice.
-          entityId: Number(row.stage_since!.replace(/\D/g, "").slice(0, 12)) + row.id,
+          // The company in the entity, the stay in the id: a later overstay
+          // of the same company is a new notice. The id is the day the
+          // stay began, counted from the epoch — small enough for an
+          // integer column, unlike a timestamp written out as digits.
+          entity: `partner-stuck-${row.id}`,
+          entityId: Math.floor(Date.parse(`${row.stage_since!.replace(" ", "T")}Z`) / 86_400_000) || row.id,
           push: true,
         })
       )

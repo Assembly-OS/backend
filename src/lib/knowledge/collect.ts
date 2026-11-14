@@ -973,6 +973,71 @@ async function collectAssociation(id: number): Promise<Collected | null> {
   };
 }
 
+/**
+ * A company's card (TZ 7.3: the global AI reads the companies too): who it
+ * is, where it stands on the partnership path, what the next step is, who
+ * answers for it on both sides, and the moves it has made.
+ */
+async function collectPartner(id: number): Promise<Collected | null> {
+  const p = await get<Record<string, unknown>>(
+    `SELECT p.*, o.full_name AS owner_name, y.name AS uyushma_name FROM partners p
+       LEFT JOIN users o ON o.id = p.owner_user_id
+       LEFT JOIN uyushmalar y ON y.id = p.uyushma_id
+      WHERE p.id = ?`,
+    id,
+  );
+  if (!p) return null;
+  const contacts = await all<{ first_name: string; last_name: string; position: string | null; phone: string | null; email: string | null }>(
+    "SELECT first_name, last_name, position, phone, email FROM contacts WHERE company_id = ? ORDER BY is_head DESC, id LIMIT 30",
+    id,
+  );
+  const moves = await all<{ from_stage: string | null; to_stage: string; reason: string; note: string | null; changed_at: string }>(
+    "SELECT from_stage, to_stage, reason, note, changed_at FROM partner_stage_history WHERE partner_id = ? ORDER BY id DESC LIMIT 12",
+    id,
+  );
+  let text =
+    `Company: ${p.name}\n` +
+    line("Description", p.description) +
+    line("Industry", p.industry) +
+    line("Direction", p.direction) +
+    line("Services", p.services) +
+    line("Location", [p.country, p.city, p.address].filter(Boolean).join(", ") || null) +
+    line("Website", p.website) +
+    line("Head", [p.head_name, p.head_position].filter(Boolean).join(", ") || null) +
+    line("Status", p.status) +
+    line("Stage", p.stage_since ? `${p.stage} since ${String(p.stage_since).slice(0, 10)}` : p.stage) +
+    line("Deal value", p.deal_value ? `${p.deal_value} ${p.deal_currency ?? ""}`.trim() : null) +
+    line("Next step", p.next_step ? `${p.next_step}${p.next_step_on ? ` by ${p.next_step_on}` : ""}` : null) +
+    line("Verification", p.verification) +
+    line("Association", p.uyushma_name) +
+    line("Assembly owner", p.owner_name) +
+    line("Last contact", p.last_contact_at ? String(p.last_contact_at).slice(0, 10) : null) +
+    line("Notes", p.notes);
+  if (contacts.length) {
+    text += "\nContacts:\n";
+    for (const c of contacts)
+      text += `- ${c.first_name} ${c.last_name}${c.position ? `, ${c.position}` : ""}${c.phone ? `, ${c.phone}` : ""}${c.email ? `, ${c.email}` : ""}\n`;
+  }
+  if (moves.length) {
+    text += "\nPartnership path:\n";
+    for (const m of moves)
+      text += `- ${String(m.changed_at).slice(0, 10)}: ${m.from_stage ?? "—"} → ${m.to_stage} (${m.reason}${m.note ? `: ${m.note}` : ""})\n`;
+  }
+  return {
+    title: String(p.name),
+    text,
+    occurredAt: day((p.updated_at as string | null) ?? (p.created_at as string | null)),
+    authorId: (p.owner_user_id as number | null) ?? null,
+    lang: null,
+    reliability: RELIABILITY.partner,
+    scope: { companyId: id, uyushmaId: (p.uyushma_id as number | null) ?? null },
+    links: [
+      { toKind: "company" as const, toId: id, relation: "about" },
+      ...(p.owner_user_id ? [{ toKind: "person" as const, toId: Number(p.owner_user_id), relation: "assigned" }] : []),
+    ],
+  };
+}
+
 /* ------------------------------------------------------------------ */
 
 export async function collect(kind: SourceKind, refId: number): Promise<Collected | null> {
@@ -997,6 +1062,8 @@ export async function collect(kind: SourceKind, refId: number): Promise<Collecte
       return collectProject(refId);
     case "uyushma":
       return collectAssociation(refId);
+    case "partner":
+      return collectPartner(refId);
     default:
       return null;
   }

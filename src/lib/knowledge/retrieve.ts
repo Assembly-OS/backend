@@ -484,3 +484,130 @@ export async function sourcesAbout(
     evidence_href: evidenceHref(row.source_id),
   }));
 }
+
+/* ------------------------------------------------------------------ */
+/* The historical reminder (TZ 7.4)                                    */
+/* ------------------------------------------------------------------ */
+
+export interface HistoryItem {
+  source_id: number;
+  kind: SourceKind;
+  ref_id: number;
+  title: string;
+  occurred_at: string | null;
+  href: string;
+  /** With whom: the company or the association, else who wrote it. */
+  who: string | null;
+  /** What was agreed, when the record says. */
+  agreed: string | null;
+  /** Where it stands: the next steps, the agreement's status. */
+  status: string | null;
+  excerpt: string | null;
+}
+
+/**
+ * What the platform already knows when somebody starts a new meeting or
+ * agreement: the records about the same company, association or project,
+ * and the ones that read like the title typed. Shown unasked on the form —
+ * "on [date] with [whom] it was negotiated; agreed: …; now: …" — each with
+ * its source, so nothing is said that cannot be opened.
+ */
+export async function relatedHistory(
+  user: User,
+  about: { companyId?: number | null; uyushmaId?: number | null; projectId?: number | null; text?: string | null },
+  limit = 6,
+): Promise<HistoryItem[]> {
+  const kinds: SourceKind[] = ["meeting", "kelishuv", "agreement", "thread_entry", "partner", "uyushma", "project"];
+  const found = new Map<number, HistoryItem>();
+  const add = (item: HistoryItem) => {
+    if (!found.has(item.source_id)) found.set(item.source_id, item);
+  };
+
+  if (about.companyId || about.uyushmaId || about.projectId) {
+    const sources = await sourcesAbout(user, {
+      companyId: about.companyId,
+      uyushmaId: about.uyushmaId,
+      projectId: about.projectId,
+      kinds,
+      limit: 20,
+    });
+    for (const s of sources)
+      add({
+        source_id: s.source_id,
+        kind: s.kind,
+        ref_id: s.ref_id,
+        title: s.title,
+        occurred_at: s.occurred_at,
+        href: s.href,
+        who: s.author_name,
+        agreed: null,
+        status: null,
+        excerpt: null,
+      });
+  }
+  const text = about.text?.trim();
+  if (text && text.length >= 3) {
+    const hits = await searchKnowledge(user, text, { kinds, limit: 8 });
+    for (const h of hits)
+      add({
+        source_id: h.source_id,
+        kind: h.kind,
+        ref_id: h.ref_id,
+        title: h.title,
+        occurred_at: h.occurred_at,
+        href: h.href,
+        who: h.author_name,
+        agreed: null,
+        status: null,
+        excerpt: h.excerpt,
+      });
+  }
+
+  // The record's own words for "agreed" and "now", where the table has them.
+  const items = [...found.values()]
+    .sort((a, b) => (b.occurred_at ?? "").localeCompare(a.occurred_at ?? ""))
+    .slice(0, limit);
+  for (const item of items) {
+    if (item.kind === "meeting") {
+      const m = await get<{ agreed: string | null; next_steps: string | null; company: string | null; uyushma: string | null }>(
+        `SELECT m.agreed, m.next_steps, p.name AS company, y.name AS uyushma FROM meetings m
+           LEFT JOIN partners p ON p.id = m.company_id LEFT JOIN uyushmalar y ON y.id = m.uyushma_id WHERE m.id = ?`,
+        item.ref_id,
+      );
+      if (m) {
+        item.agreed = m.agreed;
+        item.status = m.next_steps;
+        item.who = m.company ?? m.uyushma ?? item.who;
+      }
+    } else if (item.kind === "kelishuv") {
+      const k = await get<{ status: string; signed_on: string | null; amount: number | null; currency: string | null; parties: string | null }>(
+        `SELECT k.status, k.signed_on, k.amount, k.currency,
+                (SELECT string_agg(p.name, ', ') FROM kelishuv_parties kp JOIN partners p ON p.id = kp.company_id WHERE kp.kelishuv_id = k.id) AS parties
+           FROM kelishuvlar k WHERE k.id = ?`,
+        item.ref_id,
+      );
+      if (k) {
+        item.status = k.status;
+        item.who = k.parties ?? item.who;
+        item.agreed = k.amount ? `${k.amount} ${k.currency ?? ""}`.trim() : null;
+      }
+    } else if (item.kind === "agreement") {
+      const a = await get<{ description: string; status: string; deadline: string | null; company: string | null }>(
+        "SELECT a.description, a.status, a.deadline, p.name AS company FROM agreements a LEFT JOIN partners p ON p.id = a.company_id WHERE a.id = ?",
+        item.ref_id,
+      );
+      if (a) {
+        item.agreed = a.description;
+        item.status = a.deadline ? `${a.status} · ${a.deadline}` : a.status;
+        item.who = a.company ?? item.who;
+      }
+    } else if (item.kind === "partner") {
+      const p = await get<{ stage: string; next_step: string | null }>("SELECT stage, next_step FROM partners WHERE id = ?", item.ref_id);
+      if (p) {
+        item.who = item.title;
+        item.status = p.next_step ? `${p.stage} · ${p.next_step}` : p.stage;
+      }
+    }
+  }
+  return items;
+}
