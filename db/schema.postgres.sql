@@ -1554,3 +1554,21 @@ $$;
 -- message so the chat can show them and nothing transcribes the same audio
 -- twice.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript TEXT;
+
+-- ---------------------------------------------------------------------------
+-- Settings the chairman changes without a deployment (TZ 5.2: "nisbatlar
+-- sozlamalarda o'zgartiriladi"). One JSON document per key.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      JSONB NOT NULL,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+DO $$
+BEGIN
+  EXECUTE 'DROP TRIGGER IF EXISTS audit_on_write ON settings';
+  EXECUTE 'CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON settings '
+          'FOR EACH ROW EXECUTE FUNCTION audit_row()';
+END;
+$$;
