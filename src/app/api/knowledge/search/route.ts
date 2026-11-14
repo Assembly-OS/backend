@@ -17,6 +17,7 @@ export async function GET(request: Request) {
   const hits = await searchKnowledge(user, query, {
     kinds: kinds.length ? kinds : undefined,
     projectId: parseId(url.searchParams.get("project")),
+    uyushmaId: parseId(url.searchParams.get("uyushma")),
     limit: 12,
   });
   return NextResponse.json({ hits });

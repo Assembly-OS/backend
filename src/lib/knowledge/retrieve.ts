@@ -19,6 +19,7 @@ import { evidenceHref, hrefFor, type FactRow, type SourceRow } from "./types";
 export interface SearchFilter {
   kinds?: SourceKind[];
   projectId?: number | null;
+  uyushmaId?: number | null;
   authorId?: number | null;
   /** YYYY-MM-DD, inclusive, against the day the thing happened. */
   from?: string | null;
@@ -79,6 +80,10 @@ function filterSql(filter: SearchFilter, alias = "s"): { sql: string[]; params: 
   if (filter.projectId) {
     sql.push(`${alias}.project_id = ?`);
     params.push(filter.projectId);
+  }
+  if (filter.uyushmaId) {
+    sql.push(`${alias}.uyushma_id = ?`);
+    params.push(filter.uyushmaId);
   }
   if (filter.authorId) {
     sql.push(`${alias}.author_id = ?`);
@@ -389,6 +394,7 @@ export async function sourcesAbout(
   user: User,
   about: {
     projectId?: number | null;
+    uyushmaId?: number | null;
     personId?: number | null;
     companyId?: number | null;
     taskId?: number | null;
@@ -407,6 +413,10 @@ export async function sourcesAbout(
       "(s.project_id = ? OR EXISTS (SELECT 1 FROM knowledge_links k WHERE k.source_id = s.id AND k.to_kind = 'project' AND k.to_id = ?))",
     );
     params.push(about.projectId, about.projectId);
+  }
+  if (about.uyushmaId) {
+    where.push("s.uyushma_id = ?");
+    params.push(about.uyushmaId);
   }
   if (about.personId) {
     where.push(

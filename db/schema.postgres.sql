@@ -1572,3 +1572,96 @@ BEGIN
           'FOR EACH ROW EXECUTE FUNCTION audit_row()';
 END;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- TZ block 6: the associations the Assembly is built on, and the nine-stage
+-- partnership path for companies.
+-- ---------------------------------------------------------------------------
+
+-- 6.1 The association record. The name the table was born with is the
+-- Uzbek (latin) one; the other three languages sit beside it.
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS name_uzc TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS name_ru TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS name_en TEXT;
+-- GR | BR | FR | PR — the department that answers for the association.
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS kontur TEXT;
+-- The member of staff who answers for it (TZ: "Assambleya mas'uli").
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS responsible_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+-- The association's own head: a name, a post and a way to reach them; the
+-- platform account, when there is one, stays in head_user_id.
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS head_name TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS head_position TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS head_contact TEXT;
+-- FAOL | SUST | TOXTATILGAN
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'FAOL';
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS updated_at TEXT;
+ALTER TABLE uyushmalar ADD COLUMN IF NOT EXISTS created_by INTEGER;
+
+-- The projects an association takes part in — several, so a link table
+-- rather than the one `loyihalar.uyushma_id` the first release had.
+CREATE TABLE IF NOT EXISTS uyushma_projects (
+  uyushma_id INTEGER NOT NULL REFERENCES uyushmalar(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES loyihalar(id) ON DELETE CASCADE,
+  PRIMARY KEY (uyushma_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_uyushma_projects_project ON uyushma_projects(project_id);
+
+-- A company may belong to an association (its member companies).
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS uyushma_id INTEGER REFERENCES uyushmalar(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_partners_uyushma ON partners(uyushma_id);
+
+-- 6.2 The partnership path. Nine stages in place of four statuses; the
+-- status column stays and is written from the stage, so every page that
+-- filters by it keeps working.
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'NEW_CONTACT';
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS stage_since TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS deal_value DOUBLE PRECISION;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS deal_currency TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS next_step TEXT;
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS next_step_on TEXT;
+-- 6.3 "tekshiruv holati": NOT_CHECKED | CHECKED | FLAGGED
+ALTER TABLE partners ADD COLUMN IF NOT EXISTS verification TEXT NOT NULL DEFAULT 'NOT_CHECKED';
+CREATE INDEX IF NOT EXISTS idx_partners_stage ON partners(stage);
+
+-- Every move along the path, kept: the TZ asks for the transition history.
+CREATE TABLE IF NOT EXISTS partner_stage_history (
+  id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  partner_id INTEGER NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  from_stage TEXT,
+  to_stage   TEXT NOT NULL,
+  -- manual | meeting | kelishuv | contract — what moved it.
+  reason     TEXT NOT NULL DEFAULT 'manual',
+  note       TEXT,
+  changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  changed_at TEXT NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_partner_stage_history ON partner_stage_history(partner_id, id DESC);
+
+-- Once: companies that existed before the path get a stage from their
+-- status, and a clock that starts now rather than at their creation — a
+-- company "stuck" since 2026-08 on day one would ring every owner's bell.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_once WHERE key = 'partner_stage_backfill') THEN
+    UPDATE partners SET
+      stage = CASE status WHEN 'ACTIVE' THEN 'ACTIVE' WHEN 'PAUSED' THEN 'NEGOTIATION'
+                          WHEN 'ARCHIVED' THEN 'CLOSED' ELSE 'NEW_CONTACT' END,
+      stage_since = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+    WHERE stage_since IS NULL;
+    INSERT INTO schema_once (key) VALUES ('partner_stage_backfill');
+  END IF;
+END;
+$$;
+
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['uyushma_projects', 'partner_stage_history', 'uyushmalar'] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS archive_on_delete ON %I', t);
+    EXECUTE format('CREATE TRIGGER archive_on_delete BEFORE DELETE ON %I FOR EACH ROW EXECUTE FUNCTION archive_deleted_row()', t);
+    EXECUTE format('DROP TRIGGER IF EXISTS audit_on_write ON %I', t);
+    EXECUTE format('CREATE TRIGGER audit_on_write AFTER INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION audit_row()', t);
+  END LOOP;
+END;
+$$;

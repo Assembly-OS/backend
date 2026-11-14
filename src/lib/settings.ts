@@ -1,5 +1,6 @@
 import { get, now, run } from "./pg";
 import { mergeSettings, type KpiSettings } from "./kpi-rules";
+import { mergeStageLimits, type Stage } from "./crm-stages";
 
 /**
  * Settings the chairman changes without a deployment: one row per key,
@@ -40,4 +41,12 @@ export async function kpiSettingsMeta(): Promise<{ updated_by_name: string | nul
     KPI_SETTINGS_KEY,
   );
   return row ?? { updated_by_name: null, updated_at: null };
+}
+
+export const CRM_SETTINGS_KEY = "crm";
+
+/** The partnership path's stage limits, stored over the defaults. */
+export async function stageLimits(): Promise<Record<Stage, number>> {
+  const stored = await readSetting<{ stageLimits?: unknown }>(CRM_SETTINGS_KEY);
+  return mergeStageLimits(stored?.stageLimits);
 }

@@ -6,6 +6,7 @@ import { get, now, tx } from "@/lib/pg";
 import { id as parseId } from "@/lib/validate";
 import { readKelishuvInput, syncObligations } from "../input";
 import { remember } from "@/lib/knowledge/sources";
+import { advanceStage } from "@/lib/crm";
 
 /**
  * Correcting an agreement, its parties and its obligations.
@@ -69,6 +70,10 @@ export async function PATCH(
   });
 
   await syncObligations(id, input, user);
+  // TZ 6.2, stages 6 and 7: a signed MOU, LOI or term sheet, or a contract.
+  if (input.signed_on && (input.status === "OPEN" || input.status === "DONE"))
+    for (const partyId of input.party_ids)
+      await advanceStage(partyId, input.kind === "CONTRACT" ? "contract" : "kelishuv", user.id, input.title);
   void remember("kelishuv", id);
   return NextResponse.json({ ok: true, id });
 }
